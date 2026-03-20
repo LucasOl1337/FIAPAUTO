@@ -4,6 +4,7 @@ export type ModuleKey =
   | 'resumos'
   | 'fragilidades'
   | 'organizacao'
+  | 'bot'
 
 export type LessonStatus =
   | 'draft'

@@ -15,4 +15,5 @@ if (-not (Test-Path "$PSScriptRoot\node_modules")) {
 }
 
 Write-Host 'Iniciando FIAPAUTO em modo desenvolvimento...'
+Start-Process 'http://127.0.0.1:43871'
 npm run dev

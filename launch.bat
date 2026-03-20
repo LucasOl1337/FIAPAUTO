@@ -22,6 +22,7 @@ if not exist "node_modules" (
 )
 
 echo Iniciando FIAPAUTO em modo desenvolvimento...
+start "" http://127.0.0.1:43871
 call npm run dev
 
 if errorlevel 1 (

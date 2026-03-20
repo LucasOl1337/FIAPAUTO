@@ -11,6 +11,12 @@ node_modules
 dist
 dist-ssr
 *.local
+bot/output
+bot/session
+output
+server/llmKeys.local.py
+launcher-smoke.err
+launcher-smoke.out
 
 # Editor directories and files
 .vscode/*
@@ -22,3 +28,5 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+__pycache__/
+*.pyc

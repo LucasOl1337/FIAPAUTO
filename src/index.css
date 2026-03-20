@@ -1,26 +1,30 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Manrope:wght@400;500;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Sora:wght@500;600;700;800&display=swap');
 
 :root {
-  --text: #49505a;
-  --text-h: #151b23;
-  --muted: #6d7480;
-  --bg: #f6f3ee;
-  --bg-alt: #fcfaf7;
-  --border: rgba(21, 27, 35, 0.1);
-  --panel-bg: rgba(255, 255, 255, 0.76);
-  --accent: #e56a44;
-  --accent-soft: rgba(229, 106, 68, 0.1);
+  --text: #d8dce3;
+  --text-h: #ffffff;
+  --muted: #8d949f;
+  --bg: #141414;
+  --bg-alt: #1a1a1a;
+  --border: rgba(255, 255, 255, 0.08);
+  --panel-bg: rgba(29, 29, 29, 0.86);
+  --surface: linear-gradient(180deg, rgba(31, 31, 31, 0.96), rgba(24, 24, 24, 0.96));
+  --surface-muted: rgba(255, 255, 255, 0.04);
+  --surface-border: rgba(255, 255, 255, 0.08);
+  --accent: #ff0f5f;
+  --accent-soft: rgba(255, 15, 95, 0.14);
   --shadow:
-    0 18px 48px rgba(108, 92, 76, 0.1),
-    0 8px 18px rgba(21, 27, 35, 0.04);
-  --sans: 'Manrope', sans-serif;
-  --heading: 'Space Grotesk', sans-serif;
+    0 24px 60px rgba(0, 0, 0, 0.35),
+    0 10px 24px rgba(0, 0, 0, 0.22);
+  --sans: 'Outfit', sans-serif;
+  --heading: 'Sora', sans-serif;
 
   font: 16px/1.5 var(--sans);
   letter-spacing: -0.01em;
   color: var(--text);
   background:
-    radial-gradient(circle at top left, rgba(229, 106, 68, 0.08), transparent 24%),
+    radial-gradient(circle at top left, rgba(255, 15, 95, 0.14), transparent 18%),
+    radial-gradient(circle at bottom center, rgba(255, 15, 95, 0.06), transparent 28%),
     linear-gradient(180deg, var(--bg-alt) 0%, var(--bg) 100%);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -39,6 +43,10 @@ html {
 body {
   margin: 0;
   min-width: 320px;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(255, 15, 95, 0.12), transparent 16%),
+    linear-gradient(180deg, #1a1a1a 0%, #111111 100%);
 }
 
 body,

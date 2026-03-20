@@ -1,91 +1,62 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useEffectEvent, useMemo, useState } from 'react'
 import './App.css'
-import { requestSummaryFromProvider, requestTranscriptFromProvider } from './lib/demoPipeline'
+import {
+  askTopicAssistant,
+  buildBotFileUrl,
+  connectTeamsSession,
+  emptyBotState,
+  fetchBotStatus,
+  fetchTopic,
+  fetchTopicDebug,
+  generateTopicMemory,
+  generateTopicSummary,
+  normalizeLessonTitle,
+  resetBotDemo,
+  runBotDemo,
+  syncReadyLessonsIntoWorkspace,
+  type BotState,
+  type SubjectTopic,
+  type TopicAskResult,
+  type TopicSummaryResult,
+} from './lib/botApi'
 import { initialWorkspaceState } from './lib/demoData'
 import { loadWorkspaceState, resetWorkspaceState, saveWorkspaceState } from './lib/storage'
-import type {
-  CourseMaterial,
-  Fragility,
-  Lesson,
-  LessonStatus,
-  MaterialType,
-  ModuleKey,
-  Summary,
-  Transcript,
-  WorkspaceState,
-} from './types'
+import type { WorkspaceState } from './types'
 
-type LessonFormState = {
-  title: string
-  discipline: string
-  date: string
-  recordingReference: string
-  notes: string
-}
-
-type MaterialFormState = {
-  title: string
-  type: MaterialType
-  reference: string
-}
-
-const modules: Array<{ key: ModuleKey; label: string; hint: string }> = [
-  { key: 'aulas', label: 'Aulas', hint: 'Cadastro, historico e status' },
-  { key: 'transcricao', label: 'Transcricao', hint: 'Fila e texto processado' },
-  { key: 'resumos', label: 'Resumos', hint: 'Topicos-chave e acoes' },
-  { key: 'fragilidades', label: 'Fragilidades', hint: 'Prioridades de estudo' },
-  { key: 'organizacao', label: 'Organizacao', hint: 'Materiais, links e tarefas' },
-]
-
-const emptyLessonForm: LessonFormState = {
-  title: '',
-  discipline: '',
-  date: '',
-  recordingReference: '',
-  notes: '',
-}
-
-const emptyMaterialForm: MaterialFormState = {
-  title: '',
-  type: 'link',
-  reference: '',
-}
-
-function formatStatus(status: LessonStatus) {
-  const labels: Record<LessonStatus, string> = {
-    draft: 'Rascunho',
-    recorded: 'Gravada',
-    transcribing: 'Transcrevendo',
-    transcribed: 'Transcrita',
-    summarizing: 'Resumindo',
-    summarized: 'Resumida',
-  }
-
-  return labels[status]
-}
-
-function getStatusClass(status: LessonStatus) {
-  if (status === 'summarized') return 'success'
-  if (status === 'transcribed' || status === 'recorded') return 'warning'
-  if (status === 'transcribing' || status === 'summarizing') return 'processing'
-
-  return 'neutral'
-}
-
-function App() {
+export default function App() {
   const [workspace, setWorkspace] = useState<WorkspaceState>(() => loadWorkspaceState())
-  const [activeModule, setActiveModule] = useState<ModuleKey>('aulas')
-  const [selectedLessonId, setSelectedLessonId] = useState<string>(
+  const [botState, setBotState] = useState<BotState>(emptyBotState)
+  const [selectedLessonId, setSelectedLessonId] = useState(
     () => loadWorkspaceState().lessons[0]?.id ?? initialWorkspaceState.lessons[0]?.id ?? '',
   )
-  const [lessonForm, setLessonForm] = useState<LessonFormState>(emptyLessonForm)
-  const [materialForm, setMaterialForm] = useState<MaterialFormState>(emptyMaterialForm)
-  const [activity, setActivity] = useState('Workspace carregado')
-  const [busyAction, setBusyAction] = useState<'transcribe' | 'summarize' | 'pipeline' | null>(null)
+  const [selectedTopicId, setSelectedTopicId] = useState('')
+  const [selectedTopic, setSelectedTopic] = useState<SubjectTopic | null>(null)
+  const [topicSummary, setTopicSummary] = useState<TopicSummaryResult | null>(null)
+  const [topicAnswer, setTopicAnswer] = useState<TopicAskResult | null>(null)
+  const [topicQuestion, setTopicQuestion] = useState('')
+  const [topicDebugEvents, setTopicDebugEvents] = useState<BotState['llmDebug']['events']>([])
+  const [activity, setActivity] = useState('Projeto pronto para testar o bot')
+  const [botBusy, setBotBusy] = useState<'connect' | 'load' | 'test' | 'reset' | null>(null)
+  const [topicBusy, setTopicBusy] = useState<'summary' | 'memory' | 'ask' | 'detail' | null>(null)
+  const [activeTab, setActiveTab] = useState<'aulas' | 'trabalhos'>('aulas')
+  const [viewMode, setViewMode] = useState<'admin' | 'user'>('user')
+  const refreshBotStatusEvent = useEffectEvent((showMessage = false) => {
+    void refreshBotStatus(showMessage)
+  })
 
   useEffect(() => {
     saveWorkspaceState(workspace)
   }, [workspace])
+
+  useEffect(() => {
+    refreshBotStatusEvent(false)
+  }, [])
+
+  useEffect(() => {
+    if (botState.authStatus === 'authenticated') return
+    const timer = window.setInterval(() => refreshBotStatusEvent(false), 5000)
+    return () => window.clearInterval(timer)
+  }, [botState.authStatus])
 
   useEffect(() => {
     if (!workspace.lessons.find((lesson) => lesson.id === selectedLessonId)) {
@@ -93,795 +64,414 @@ function App() {
     }
   }, [selectedLessonId, workspace.lessons])
 
+  useEffect(() => {
+    if (!botState.topics.find((topic) => topic.id === selectedTopicId)) {
+      setSelectedTopicId(botState.topics[0]?.id ?? '')
+    }
+  }, [botState.topics, selectedTopicId])
+
+  useEffect(() => {
+    if (!selectedTopicId) {
+      setSelectedTopic(null)
+      setTopicDebugEvents([])
+      return
+    }
+    void loadTopicDetail(selectedTopicId)
+  }, [selectedTopicId])
+
+  const importedLessons = useMemo(
+    () => workspace.lessons.filter((lesson) => lesson.notes.includes('Importado automaticamente pelo bot do Teams')),
+    [workspace.lessons],
+  )
   const selectedLesson = useMemo(
-    () => workspace.lessons.find((lesson) => lesson.id === selectedLessonId) ?? null,
-    [selectedLessonId, workspace.lessons],
+    () => importedLessons.find((lesson) => lesson.id === selectedLessonId) ?? importedLessons[0] ?? null,
+    [importedLessons, selectedLessonId],
   )
-
   const selectedTranscript = useMemo(
-    () => workspace.transcripts.find((transcript) => transcript.lessonId === selectedLessonId) ?? null,
-    [selectedLessonId, workspace.transcripts],
+    () => workspace.transcripts.find((transcript) => transcript.lessonId === selectedLesson?.id) ?? null,
+    [selectedLesson?.id, workspace.transcripts],
+  )
+  const selectedTopicListItem = useMemo(
+    () => botState.topics.find((topic) => topic.id === selectedTopicId) ?? botState.topics[0] ?? null,
+    [botState.topics, selectedTopicId],
   )
 
-  const selectedSummary = useMemo(
-    () => workspace.summaries.find((summary) => summary.lessonId === selectedLessonId) ?? null,
-    [selectedLessonId, workspace.summaries],
-  )
+  async function refreshBotStatus(showMessage = true) {
+    setBotBusy('load')
+    try {
+      const data = await fetchBotStatus()
+      setBotState(mapBotState(data))
+      setWorkspace((current) => syncReadyLessonsIntoWorkspace(current, data.readyLessons))
+      setTopicSummary(null)
+      setTopicAnswer(null)
+      if (data.readyLessons[0]) setSelectedLessonId(data.readyLessons[0].lessonId)
+      if (!selectedTopicId && data.topics[0]) setSelectedTopicId(data.topics[0].id)
+      if (showMessage) setActivity('Status do bot atualizado')
+    } catch {
+      setBotState((current) => ({ ...current, apiConnected: false }))
+      if (showMessage) setActivity('API do bot nao respondeu. Rode npm run dev para subir tudo junto.')
+    } finally {
+      setBotBusy(null)
+    }
+  }
 
-  const selectedFragilities = useMemo(
-    () => workspace.fragilities.filter((fragility) => fragility.lessonId === selectedLessonId),
-    [selectedLessonId, workspace.fragilities],
-  )
+  async function runBotFromSite() {
+    setBotBusy('test')
+    try {
+      const data = await runBotDemo()
+      setBotState(mapBotState(data))
+      setWorkspace((current) => syncReadyLessonsIntoWorkspace(current, data.readyLessons))
+      setTopicSummary(null)
+      setTopicAnswer(null)
+      if (data.readyLessons[0]) setSelectedLessonId(data.readyLessons[0].lessonId)
+      if (data.topics[0]) setSelectedTopicId(data.topics[0].id)
+      if (data.runtimeError) return setActivity(explainRuntimeError(data.runtimeError))
+      if (data.workspaceReport.authStatus !== 'authenticated') {
+        return setActivity('Teams precisa de login. Use "Conectar Teams" para salvar a sessao e tente novamente.')
+      }
+      if (data.executedJobs > 0) return setActivity(`Bot executado: ${data.executedJobs} aula(s) ao vivo processada(s).`)
+      setActivity('Varredura concluida. Materias e trabalhos foram atualizados no workspace de topicos.')
+    } catch (error) {
+      if (error instanceof Error && error.message === 'scan_in_progress') {
+        const payload = (error as Error & { payload?: Parameters<typeof mapBotState>[0] }).payload
+        if (payload) setBotState(mapBotState(payload))
+        return setActivity('O bot ja esta executando uma varredura. Aguarde alguns segundos e atualize o status.')
+      }
+      setActivity('Falha ao executar o bot pelo site.')
+    } finally {
+      setBotBusy(null)
+    }
+  }
 
-  const selectedMaterials = useMemo(
-    () => workspace.materials.filter((material) => material.lessonId === selectedLessonId),
-    [selectedLessonId, workspace.materials],
-  )
+  async function connectTeams() {
+    setBotBusy('connect')
+    try {
+      const data = await connectTeamsSession()
+      setBotState(mapBotState(data))
+      setTopicSummary(null)
+      setTopicAnswer(null)
+      if (data.runtimeError) return setActivity(explainRuntimeError(data.runtimeError))
+      setActivity(data.connected ? 'Sessao do Teams confirmada.' : 'A janela do Teams foi aberta para concluir o login.')
+    } catch {
+      setActivity('Falha ao abrir a sessao do Teams.')
+    } finally {
+      setBotBusy(null)
+    }
+  }
 
-  const stats = useMemo(
-    () => ({
-      lessons: workspace.lessons.length,
-      transcripts: workspace.transcripts.length,
-      summaries: workspace.summaries.length,
-      fragilities: workspace.fragilities.length,
-      materials: workspace.materials.length,
-    }),
-    [workspace],
-  )
+  async function resetAll() {
+    setBotBusy('reset')
+    try {
+      const data = await resetBotDemo()
+      setBotState(mapBotState(data))
+      setTopicSummary(null)
+      setTopicAnswer(null)
+      setSelectedTopic(null)
+      setTopicDebugEvents([])
+      const state = resetWorkspaceState()
+      setWorkspace(state)
+      setSelectedLessonId(state.lessons[0]?.id ?? '')
+      setSelectedTopicId('')
+      setActivity('Demo resetada. O bot esta pronto para um novo teste.')
+    } catch {
+      setActivity('Falha ao resetar a demo.')
+    } finally {
+      setBotBusy(null)
+    }
+  }
 
-  const moduleMeta = useMemo(
-    () => ({
-      aulas: `${stats.lessons} aulas`,
-      transcricao: `${stats.transcripts} textos`,
-      resumos: `${stats.summaries} resumos`,
-      fragilidades: `${stats.fragilities} alertas`,
-      organizacao: `${stats.materials} itens`,
-    }),
-    [stats],
-  )
-
-  function patchLesson(lessonId: string, patch: Partial<Lesson>) {
-    setWorkspace((current) => ({
-      ...current,
-      lessons: current.lessons.map((lesson) =>
-        lesson.id === lessonId
+  async function loadTopicDetail(topicId: string) {
+    setTopicBusy('detail')
+    try {
+      const [topic, debug] = await Promise.all([fetchTopic(topicId), fetchTopicDebug(topicId)])
+      setSelectedTopic(topic)
+      setTopicDebugEvents(debug.events)
+      setTopicSummary(
+        topic.summary
           ? {
-              ...lesson,
-              ...patch,
-              updatedAt: new Date().toISOString(),
+              topicId: topic.id,
+              moduleKey: topic.moduleKey,
+              summary: topic.summary,
+              warnings: topic.warnings,
+              filesUsed: topic.attachments.map((item) => item.path),
+              generatedAt: topic.summaryGeneratedAt || topic.updatedAt,
             }
-          : lesson,
-      ),
-    }))
-  }
-
-  function upsertTranscript(transcript: Transcript) {
-    setWorkspace((current) => ({
-      ...current,
-      transcripts: [
-        ...current.transcripts.filter((item) => item.lessonId !== transcript.lessonId),
-        transcript,
-      ],
-    }))
-  }
-
-  function upsertSummary(summary: Summary, fragilities: Fragility[]) {
-    setWorkspace((current) => ({
-      ...current,
-      summaries: [...current.summaries.filter((item) => item.lessonId !== summary.lessonId), summary],
-      fragilities: [
-        ...current.fragilities.filter((item) => item.lessonId !== summary.lessonId),
-        ...fragilities,
-      ],
-    }))
-  }
-
-  function handleCreateLesson(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-
-    if (!lessonForm.title.trim() || !lessonForm.discipline.trim() || !lessonForm.date) {
-      setActivity('Preencha titulo, disciplina e data para cadastrar a aula')
-      return
-    }
-
-    const timestamp = new Date().toISOString()
-    const lesson: Lesson = {
-      id: crypto.randomUUID(),
-      title: lessonForm.title.trim(),
-      discipline: lessonForm.discipline.trim(),
-      date: lessonForm.date,
-      recordingReference: lessonForm.recordingReference.trim(),
-      notes: lessonForm.notes.trim(),
-      status: lessonForm.recordingReference.trim() ? 'recorded' : 'draft',
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    }
-
-    setWorkspace((current) => ({
-      ...current,
-      lessons: [lesson, ...current.lessons],
-    }))
-    setSelectedLessonId(lesson.id)
-    setLessonForm(emptyLessonForm)
-    setActiveModule('aulas')
-    setActivity(`Aula criada: ${lesson.title}`)
-  }
-
-  function handleSimulateRecording() {
-    if (!selectedLesson) {
-      setActivity('Selecione uma aula para registrar a gravacao')
-      return
-    }
-
-    patchLesson(selectedLesson.id, {
-      recordingReference:
-        selectedLesson.recordingReference || `simulado://gravacoes/${selectedLesson.id}.mp4`,
-      status: selectedLesson.status === 'summarized' ? 'summarized' : 'recorded',
-    })
-    setActivity(`Gravacao registrada para ${selectedLesson.title}`)
-  }
-
-  async function handleProcessTranscription() {
-    if (!selectedLesson) {
-      setActivity('Selecione uma aula antes de processar')
-      return
-    }
-
-    if (!selectedLesson.recordingReference) {
-      setActivity('A aula precisa ter uma referencia de gravacao antes da transcricao')
-      return
-    }
-
-    setBusyAction('transcribe')
-    patchLesson(selectedLesson.id, { status: 'transcribing' })
-    setActivity(`Enviando ${selectedLesson.title} para o provedor de transcricao`)
-
-    try {
-      const transcript = await requestTranscriptFromProvider({
-        ...selectedLesson,
-        status: 'transcribing',
-      })
-      upsertTranscript(transcript)
-      patchLesson(selectedLesson.id, { status: 'transcribed' })
-      setActivity(`Transcricao concluida para ${selectedLesson.title}`)
-      setActiveModule('transcricao')
+          : null,
+      )
     } catch {
-      patchLesson(selectedLesson.id, { status: 'recorded' })
-      setActivity(`Falha ao transcrever ${selectedLesson.title}`)
+      setActivity('Falha ao carregar os detalhes do topico selecionado.')
     } finally {
-      setBusyAction(null)
+      setTopicBusy(null)
     }
   }
 
-  async function handleGenerateSummary() {
-    if (!selectedLesson) {
-      setActivity('Selecione uma aula antes de gerar resumo')
-      return
-    }
-
-    const transcript =
-      workspace.transcripts.find((item) => item.lessonId === selectedLesson.id) ?? null
-
-    if (!transcript) {
-      setActivity('A aula precisa ter transcricao concluida antes do resumo')
-      return
-    }
-
-    setBusyAction('summarize')
-    patchLesson(selectedLesson.id, { status: 'summarizing' })
-    setActivity(`Gerando resumo inteligente para ${selectedLesson.title}`)
-
+  async function handleGenerateSummary(force = false) {
+    if (!selectedTopicListItem) return
+    setTopicBusy('summary')
     try {
-      const result = await requestSummaryFromProvider(selectedLesson, transcript)
-      upsertSummary(result.summary, result.fragilities)
-      patchLesson(selectedLesson.id, { status: 'summarized' })
-      setActivity(`Resumo e fragilidades atualizados para ${selectedLesson.title}`)
-      setActiveModule('resumos')
+      const result = await generateTopicSummary(selectedTopicListItem.id, force)
+      setTopicSummary(result)
+      await loadTopicDetail(selectedTopicListItem.id)
+      await refreshBotStatus(false)
+      setActivity(`Resumo persistido para a materia ${selectedTopicListItem.title}.`)
     } catch {
-      patchLesson(selectedLesson.id, { status: 'transcribed' })
-      setActivity(`Falha ao gerar resumo de ${selectedLesson.title}`)
+      setActivity('Falha ao gerar o resumo persistido do topico.')
     } finally {
-      setBusyAction(null)
+      setTopicBusy(null)
     }
   }
 
-  async function handleRunPipeline() {
-    if (!selectedLesson) {
-      setActivity('Selecione uma aula para rodar o pipeline')
-      return
-    }
-
-    setBusyAction('pipeline')
-    setActivity(`Pipeline iniciado para ${selectedLesson.title}`)
-
+  async function handleGenerateMemory(force = false) {
+    if (!selectedTopicListItem) return
+    setTopicBusy('memory')
     try {
-      if (!selectedLesson.recordingReference) {
-        patchLesson(selectedLesson.id, {
-          recordingReference: `simulado://gravacoes/${selectedLesson.id}.mp4`,
-          status: 'recorded',
-        })
-      }
-
-      const lessonWithRecording = {
-        ...selectedLesson,
-        recordingReference:
-          selectedLesson.recordingReference || `simulado://gravacoes/${selectedLesson.id}.mp4`,
-      }
-
-      patchLesson(selectedLesson.id, { status: 'transcribing' })
-      const transcript = await requestTranscriptFromProvider(lessonWithRecording)
-      upsertTranscript(transcript)
-
-      patchLesson(selectedLesson.id, { status: 'summarizing' })
-      const result = await requestSummaryFromProvider(lessonWithRecording, transcript)
-      upsertSummary(result.summary, result.fragilities)
-      patchLesson(selectedLesson.id, { status: 'summarized' })
-
-      setActivity(`Pipeline completo para ${selectedLesson.title}`)
-      setActiveModule('fragilidades')
+      await generateTopicMemory(selectedTopicListItem.id, force)
+      await loadTopicDetail(selectedTopicListItem.id)
+      await refreshBotStatus(false)
+      setActivity(`Memoria do agente atualizada para a materia ${selectedTopicListItem.title}.`)
     } catch {
-      patchLesson(selectedLesson.id, { status: 'recorded' })
-      setActivity(`Falha ao rodar o pipeline de ${selectedLesson.title}`)
+      setActivity('Falha ao gerar a memoria persistida do agente.')
     } finally {
-      setBusyAction(null)
+      setTopicBusy(null)
     }
   }
 
-  function handleCreateMaterial(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-
-    if (!selectedLesson) {
-      setActivity('Selecione uma aula antes de adicionar material')
+  async function handleAskTopic() {
+    const question = topicQuestion.trim()
+    if (!question || !selectedTopicListItem) {
+      setActivity('Digite uma pergunta e selecione uma materia antes de consultar o agente.')
       return
     }
-
-    if (!materialForm.title.trim() || !materialForm.reference.trim()) {
-      setActivity('Preencha titulo e referencia do material')
-      return
-    }
-
-    const material: CourseMaterial = {
-      id: crypto.randomUUID(),
-      lessonId: selectedLesson.id,
-      title: materialForm.title.trim(),
-      type: materialForm.type,
-      reference: materialForm.reference.trim(),
-      done: false,
-    }
-
-    setWorkspace((current) => ({
-      ...current,
-      materials: [material, ...current.materials],
-    }))
-    setMaterialForm(emptyMaterialForm)
-    setActivity(`Material adicionado em ${selectedLesson.title}`)
-  }
-
-  function toggleMaterial(materialId: string) {
-    setWorkspace((current) => ({
-      ...current,
-      materials: current.materials.map((material) =>
-        material.id === materialId ? { ...material, done: !material.done } : material,
-      ),
-    }))
-    setActivity('Status do item de organizacao atualizado')
-  }
-
-  function handleResetDemo() {
-    const state = resetWorkspaceState()
-    setWorkspace(state)
-    setSelectedLessonId(state.lessons[0]?.id ?? '')
-    setActivity('Workspace restaurado para o estado inicial da demo')
-    setActiveModule('aulas')
-  }
-
-  function renderLessonsModule() {
-    return (
-      <>
-        <div className="module-header">
-          <div>
-            <p className="section-kicker">Aulas</p>
-            <h2>Cadastro e historico do curso</h2>
-          </div>
-          <div className="module-actions">
-            <button type="button" className="primary-button" onClick={handleSimulateRecording}>
-              Simular gravacao
-            </button>
-            <button type="button" className="secondary-button" onClick={handleRunPipeline}>
-              Rodar pipeline
-            </button>
-          </div>
-        </div>
-
-        <div className="panel-grid">
-          <form className="surface-card form-card" onSubmit={handleCreateLesson}>
-            <h3>Nova aula</h3>
-            <div className="form-grid">
-              <label>
-                <span>Titulo</span>
-                <input
-                  value={lessonForm.title}
-                  onChange={(event) =>
-                    setLessonForm((current) => ({ ...current, title: event.target.value }))
-                  }
-                  placeholder="Ex.: Introducao a embeddings"
-                />
-              </label>
-              <label>
-                <span>Disciplina</span>
-                <input
-                  value={lessonForm.discipline}
-                  onChange={(event) =>
-                    setLessonForm((current) => ({ ...current, discipline: event.target.value }))
-                  }
-                  placeholder="Ex.: NLP"
-                />
-              </label>
-              <label>
-                <span>Data</span>
-                <input
-                  type="date"
-                  value={lessonForm.date}
-                  onChange={(event) =>
-                    setLessonForm((current) => ({ ...current, date: event.target.value }))
-                  }
-                />
-              </label>
-              <label>
-                <span>Gravacao ou link</span>
-                <input
-                  value={lessonForm.recordingReference}
-                  onChange={(event) =>
-                    setLessonForm((current) => ({
-                      ...current,
-                      recordingReference: event.target.value,
-                    }))
-                  }
-                  placeholder="drive:// ou https://"
-                />
-              </label>
-              <label className="full-width">
-                <span>Observacoes</span>
-                <textarea
-                  value={lessonForm.notes}
-                  onChange={(event) =>
-                    setLessonForm((current) => ({ ...current, notes: event.target.value }))
-                  }
-                  placeholder="Topicos, pendencias ou contexto para o resumo"
-                  rows={3}
-                />
-              </label>
-            </div>
-            <button type="submit" className="primary-button full-width-button">
-              Cadastrar aula
-            </button>
-          </form>
-
-          <div className="surface-card list-card">
-            <div className="list-card-header">
-              <h3>Biblioteca</h3>
-              <span>{workspace.lessons.length} aulas</span>
-            </div>
-            <div className="stack-list">
-              {workspace.lessons.map((lesson) => (
-                <button
-                  key={lesson.id}
-                  type="button"
-                  className={selectedLessonId === lesson.id ? 'lesson-row active' : 'lesson-row'}
-                  onClick={() => {
-                    setSelectedLessonId(lesson.id)
-                    setActivity(`Aula selecionada: ${lesson.title}`)
-                  }}
-                >
-                  <div>
-                    <strong>{lesson.title}</strong>
-                    <p>
-                      {lesson.discipline} · {lesson.date}
-                    </p>
-                  </div>
-                  <span className={`badge ${getStatusClass(lesson.status)}`}>
-                    {formatStatus(lesson.status)}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      </>
-    )
-  }
-
-  function renderTranscriptionModule() {
-    return (
-      <>
-        <div className="module-header">
-          <div>
-            <p className="section-kicker">Transcricao</p>
-            <h2>Fila e resultado do provedor externo</h2>
-          </div>
-          <div className="module-actions">
-            <button
-              type="button"
-              className="primary-button"
-              disabled={busyAction !== null}
-              onClick={handleProcessTranscription}
-            >
-              {busyAction === 'transcribe' ? 'Processando...' : 'Processar aula'}
-            </button>
-          </div>
-        </div>
-
-        <div className="surface-card transcript-card">
-          {selectedLesson ? (
-            <>
-              <div className="list-card-header">
-                <h3>{selectedLesson.title}</h3>
-                <span>{selectedTranscript?.provider ?? 'Sem transcricao'}</span>
-              </div>
-              <p className="support-text">
-                Status atual: <strong>{formatStatus(selectedLesson.status)}</strong>
-              </p>
-              <div className="transcript-box">
-                {selectedTranscript?.text ?? 'A transcricao ainda nao foi gerada para esta aula.'}
-              </div>
-            </>
-          ) : (
-            <p className="empty-state">Selecione uma aula para abrir a transcricao.</p>
-          )}
-        </div>
-      </>
-    )
-  }
-
-  function renderSummaryModule() {
-    return (
-      <>
-        <div className="module-header">
-          <div>
-            <p className="section-kicker">Resumos</p>
-            <h2>Topicos-chave e proximos passos</h2>
-          </div>
-          <div className="module-actions">
-            <button
-              type="button"
-              className="primary-button"
-              disabled={busyAction !== null}
-              onClick={handleGenerateSummary}
-            >
-              {busyAction === 'summarize' ? 'Gerando...' : 'Gerar resumo'}
-            </button>
-          </div>
-        </div>
-
-        <div className="panel-grid">
-          <div className="surface-card summary-section">
-            <div className="list-card-header">
-              <h3>Visao geral</h3>
-              <span>{selectedSummary?.provider ?? 'Sem resumo'}</span>
-            </div>
-            <p>{selectedSummary?.overview ?? 'A aula ainda nao possui resumo gerado.'}</p>
-          </div>
-          <div className="surface-card summary-section">
-            <h3>Topicos-chave</h3>
-            <div className="token-list">
-              {(selectedSummary?.topics ?? []).map((topic) => (
-                <button
-                  key={topic}
-                  type="button"
-                  className="token-button"
-                  onClick={() => setActivity(`Topico destacado: ${topic}`)}
-                >
-                  {topic}
-                </button>
-              ))}
-              {!selectedSummary && <p className="empty-state">Nenhum topico disponivel.</p>}
-            </div>
-          </div>
-          <div className="surface-card summary-section">
-            <h3>Acoes sugeridas</h3>
-            <div className="stack-list">
-              {(selectedSummary?.actions ?? []).map((action) => (
-                <button
-                  key={action}
-                  type="button"
-                  className="inline-action"
-                  onClick={() => setActivity(`Acao destacada: ${action}`)}
-                >
-                  {action}
-                </button>
-              ))}
-              {!selectedSummary && <p className="empty-state">Nenhuma acao sugerida ainda.</p>}
-            </div>
-          </div>
-        </div>
-      </>
-    )
-  }
-
-  function renderFragilitiesModule() {
-    return (
-      <>
-        <div className="module-header">
-          <div>
-            <p className="section-kicker">Fragilidades</p>
-            <h2>Lacunas de estudo e recomendacoes</h2>
-          </div>
-          <div className="module-actions">
-            <button type="button" className="secondary-button" onClick={() => setActiveModule('resumos')}>
-              Voltar para resumo
-            </button>
-          </div>
-        </div>
-
-        <div className="stack-list">
-          {selectedFragilities.length > 0 ? (
-            selectedFragilities.map((fragility) => (
-              <button
-                key={fragility.id}
-                type="button"
-                className="surface-card fragility-row"
-                onClick={() => setActivity(`Fragilidade revisada: ${fragility.theme}`)}
-              >
-                <div>
-                  <strong>{fragility.theme}</strong>
-                  <p>{fragility.recommendation}</p>
-                </div>
-                <span className={`badge priority-${fragility.priority.toLowerCase()}`}>
-                  {fragility.priority}
-                </span>
-              </button>
-            ))
-          ) : (
-            <div className="surface-card empty-box">
-              Nenhuma fragilidade registrada para a aula selecionada.
-            </div>
-          )}
-        </div>
-      </>
-    )
-  }
-
-  function renderOrganizationModule() {
-    return (
-      <>
-        <div className="module-header">
-          <div>
-            <p className="section-kicker">Organizacao</p>
-            <h2>Materiais, links e tarefas do curso</h2>
-          </div>
-        </div>
-
-        <div className="panel-grid">
-          <form className="surface-card form-card" onSubmit={handleCreateMaterial}>
-            <h3>Novo item</h3>
-            <div className="form-grid">
-              <label>
-                <span>Titulo</span>
-                <input
-                  value={materialForm.title}
-                  onChange={(event) =>
-                    setMaterialForm((current) => ({ ...current, title: event.target.value }))
-                  }
-                  placeholder="Ex.: Link da aula"
-                />
-              </label>
-              <label>
-                <span>Tipo</span>
-                <select
-                  value={materialForm.type}
-                  onChange={(event) =>
-                    setMaterialForm((current) => ({
-                      ...current,
-                      type: event.target.value as MaterialType,
-                    }))
-                  }
-                >
-                  <option value="link">Link</option>
-                  <option value="task">Tarefa</option>
-                  <option value="note">Nota</option>
-                </select>
-              </label>
-              <label className="full-width">
-                <span>Referencia</span>
-                <input
-                  value={materialForm.reference}
-                  onChange={(event) =>
-                    setMaterialForm((current) => ({ ...current, reference: event.target.value }))
-                  }
-                  placeholder="URL, tarefa ou observacao"
-                />
-              </label>
-            </div>
-            <button type="submit" className="primary-button full-width-button">
-              Adicionar ao curso
-            </button>
-          </form>
-
-          <div className="surface-card list-card">
-            <div className="list-card-header">
-              <h3>Itens da aula</h3>
-              <span>{selectedMaterials.length} itens</span>
-            </div>
-            <div className="stack-list">
-              {selectedMaterials.length > 0 ? (
-                selectedMaterials.map((material) => (
-                  <button
-                    key={material.id}
-                    type="button"
-                    className={material.done ? 'material-row done' : 'material-row'}
-                    onClick={() => toggleMaterial(material.id)}
-                  >
-                    <div>
-                      <strong>{material.title}</strong>
-                      <p>
-                        {material.type} · {material.reference}
-                      </p>
-                    </div>
-                    <span className="badge neutral">{material.done ? 'Feito' : 'Pendente'}</span>
-                  </button>
-                ))
-              ) : (
-                <p className="empty-state">Nenhum item vinculado a esta aula.</p>
-              )}
-            </div>
-          </div>
-        </div>
-      </>
-    )
-  }
-
-  function renderModuleContent() {
-    switch (activeModule) {
-      case 'aulas':
-        return renderLessonsModule()
-      case 'transcricao':
-        return renderTranscriptionModule()
-      case 'resumos':
-        return renderSummaryModule()
-      case 'fragilidades':
-        return renderFragilitiesModule()
-      case 'organizacao':
-        return renderOrganizationModule()
-      default:
-        return null
+    setTopicBusy('ask')
+    try {
+      const result = await askTopicAssistant({ topicId: selectedTopicListItem.id, question })
+      setTopicAnswer(result)
+      await loadTopicDetail(selectedTopicListItem.id)
+      await refreshBotStatus(false)
+      setActivity(result.usedFallback ? 'Resposta gerada com fallback do LLM.' : 'Resposta entregue pela memoria persistida.')
+    } catch {
+      setActivity('Falha ao perguntar ao agente da materia.')
+    } finally {
+      setTopicBusy(null)
     }
   }
 
   return (
-    <main className="app-shell">
-      <header className="topbar">
-        <div>
-          <p className="brand-kicker">FIAPAUTO</p>
-          <h1>MVP operacional do curso</h1>
+    <main className="simple-app">
+      <section className="hero-card">
+        <div className="hero-topbar">
+          <div>
+            <p className="eyebrow">FIAPAUTO</p>
+            <h1>{viewMode === 'user' ? 'Assistente de Materias' : 'Bot de gravacao, transcricao e topicos'}</h1>
+            {viewMode === 'admin' ? <p className="hero-text">Painel operacional com captura, resumo persistido e memoria do agente.</p> : null}
+          </div>
+          <div className="mode-switch" role="tablist" aria-label="Modo de visualizacao">
+            <button type="button" className={viewMode === 'user' ? 'mode-button active' : 'mode-button'} onClick={() => setViewMode('user')}>Usuario</button>
+            <button type="button" className={viewMode === 'admin' ? 'mode-button active' : 'mode-button'} onClick={() => setViewMode('admin')}>Admin</button>
+          </div>
         </div>
 
-        <div className="topbar-actions">
-          {modules.map((module) => (
-            <button
-              key={module.key}
-              type="button"
-              className={activeModule === module.key ? 'chip-button active' : 'chip-button'}
-              onClick={() => {
-                setActiveModule(module.key)
-                setActivity(`Modulo aberto: ${module.label}`)
-              }}
-            >
-              {module.label}
-            </button>
-          ))}
-        </div>
-      </header>
-
-      <section className="workspace">
-        <aside className="sidebar">
-          <div className="sidebar-header">
-            <h2>Fluxo</h2>
-            <span>demo</span>
-          </div>
-
-          <div className="module-list">
-            {modules.map((module) => (
-              <button
-                key={module.key}
-                type="button"
-                className={activeModule === module.key ? 'module-button active' : 'module-button'}
-                onClick={() => {
-                  setActiveModule(module.key)
-                  setActivity(`Modulo aberto: ${module.label}`)
-                }}
-              >
-                <strong>{module.label}</strong>
-                <span>{module.hint}</span>
-                <small>{moduleMeta[module.key]}</small>
-              </button>
-            ))}
-          </div>
-
-          <div className="sidebar-summary">
-            <button type="button" className="stat-button" onClick={() => setActiveModule('aulas')}>
-              <strong>{stats.lessons}</strong>
-              <span>Aulas</span>
-            </button>
-            <button
-              type="button"
-              className="stat-button"
-              onClick={() => setActiveModule('transcricao')}
-            >
-              <strong>{stats.transcripts}</strong>
-              <span>Transcricoes</span>
-            </button>
-            <button type="button" className="stat-button" onClick={() => setActiveModule('resumos')}>
-              <strong>{stats.summaries}</strong>
-              <span>Resumos</span>
-            </button>
-          </div>
-        </aside>
-
-        <section className="main-panel">{renderModuleContent()}</section>
-
-        <aside className="detail-panel">
-          <div className="detail-card">
-            <p className="section-kicker">Aula selecionada</p>
-            {selectedLesson ? (
-              <>
-                <h2>{selectedLesson.title}</h2>
-                <p>
-                  {selectedLesson.discipline} · {selectedLesson.date}
-                </p>
-                <span className={`badge ${getStatusClass(selectedLesson.status)}`}>
-                  {formatStatus(selectedLesson.status)}
-                </span>
-                <p>{selectedLesson.notes || 'Sem observacoes adicionais nesta aula.'}</p>
-              </>
-            ) : (
-              <p>Nenhuma aula selecionada.</p>
-            )}
-          </div>
-
-          <div className="detail-card">
-            <p className="section-kicker">Acoes rapidas</p>
-            <div className="status-stack">
-              <button type="button" className="status-button" onClick={handleSimulateRecording}>
-                Registrar gravacao
-              </button>
-              <button
-                type="button"
-                className="status-button"
-                disabled={busyAction !== null}
-                onClick={handleProcessTranscription}
-              >
-                Transcrever aula
-              </button>
-              <button
-                type="button"
-                className="status-button"
-                disabled={busyAction !== null}
-                onClick={handleGenerateSummary}
-              >
-                Gerar resumo
-              </button>
-              <button
-                type="button"
-                className="status-button"
-                disabled={busyAction !== null}
-                onClick={handleRunPipeline}
-              >
-                Rodar tudo
-              </button>
-              <button type="button" className="status-button" onClick={handleResetDemo}>
-                Resetar demo
-              </button>
+        {viewMode === 'admin' ? (
+          <>
+            <div className="action-row">
+              <button type="button" className="secondary-button" disabled={botBusy !== null} onClick={() => void connectTeams()}>{botBusy === 'connect' ? 'Abrindo Teams...' : 'Conectar Teams'}</button>
+              <button type="button" className="primary-button" disabled={botBusy !== null} onClick={() => void runBotFromSite()}>{botBusy === 'test' ? 'Executando bot...' : 'Executar bot agora'}</button>
+              <button type="button" className="secondary-button" disabled={botBusy !== null} onClick={() => void refreshBotStatus()}>{botBusy === 'load' ? 'Atualizando...' : 'Atualizar status'}</button>
+              <button type="button" className="secondary-button" disabled={botBusy !== null} onClick={() => void resetAll()}>{botBusy === 'reset' ? 'Resetando...' : 'Resetar demo'}</button>
             </div>
+            <div className="status-grid">
+              <StatusCard label="API do bot" value={botState.apiConnected ? 'Conectada' : 'Offline'} />
+              <StatusCard label="Sessao Teams" value={botState.authStatus === 'authenticated' ? 'Autenticada' : 'Login pendente'} />
+              <StatusCard label="Aulas importadas" value={String(importedLessons.length)} />
+              <StatusCard label="Topicos" value={String(botState.topics.length)} />
+              <StatusCard label="Ao vivo agora" value={String(botState.liveMeetings.length)} />
+              <StatusCard label="LLM" value={botState.llm.hasApiKey ? 'Configurado' : 'Sem token'} />
+              <StatusCard label="Ultima varredura" value={botState.scannedAt ? formatTimestamp(botState.scannedAt) : 'Ainda nao rodou'} />
+            </div>
+          </>
+        ) : null}
+      </section>
+
+      <section className="tab-row">
+        <button type="button" className={activeTab === 'aulas' ? 'tab-button active' : 'tab-button'} onClick={() => setActiveTab('aulas')}>Aulas</button>
+        <button type="button" className={activeTab === 'trabalhos' ? 'tab-button active' : 'tab-button'} onClick={() => setActiveTab('trabalhos')}>Trabalhos</button>
+      </section>
+
+      {activeTab === 'aulas' ? (
+        <section className="content-grid">
+          <article className="panel-card">
+            <div className="panel-header"><div><p className="eyebrow">Aulas do bot</p><h2>Gravacoes importadas</h2></div></div>
+            <div className="list-column">
+              {importedLessons.length > 0 ? importedLessons.map((lesson) => (
+                <button key={lesson.id} type="button" className={selectedLesson?.id === lesson.id ? 'lesson-item active' : 'lesson-item'} onClick={() => { setSelectedLessonId(lesson.id); setActivity(`Aula selecionada: ${lesson.title}`) }}>
+                  <strong>{lesson.title}</strong><span>{lesson.discipline}</span>
+                </button>
+              )) : <div className="empty-box">Nenhuma aula importada ainda.</div>}
+            </div>
+          </article>
+          <article className="panel-card transcript-panel">
+            <div className="panel-header"><div><p className="eyebrow">Transcricao</p><h2>{selectedLesson ? normalizeLessonTitle(selectedLesson.title) : 'Sem aula selecionada'}</h2></div></div>
+            <div className="meta-card"><span>Nome da aula gravada</span><strong>{selectedLesson ? normalizeLessonTitle(selectedLesson.title) : 'Aguardando bot'}</strong></div>
+            <div className="meta-card transcript-box"><span>Transcricao da aula</span><p>{selectedTranscript?.text ?? 'A transcricao aparecera aqui assim que o bot concluir a gravacao.'}</p></div>
+          </article>
+        </section>
+      ) : (
+        <section className="panel-card works-shell">
+          <div className="panel-header">
+            <div><p className="eyebrow">Trabalhos</p><h2>{viewMode === 'user' ? 'Suas materias' : 'Workspace por materia'}</h2></div>
+            {viewMode === 'admin' ? <div className="workspace-summary"><span>Servico LLM</span><strong>{botState.llm.baseUrl ? `${botState.llm.baseUrl}${botState.llm.model ? ` (${botState.llm.model})` : ''}` : 'Nao configurado'}</strong></div> : null}
           </div>
 
-          <div className="detail-card compact">
-            <p className="section-kicker">Atividade</p>
-            <strong>{activity}</strong>
+          <section className="topics-rail">
+            <div className="topics-header"><strong>Materias extraidas</strong><span>{botState.topics.length} topico(s)</span></div>
+            <div className="topics-strip">
+              {botState.topics.length > 0 ? botState.topics.map((topic) => (
+                <button key={topic.id} type="button" className={selectedTopicId === topic.id ? 'topic-pill active' : 'topic-pill'} onClick={() => { setSelectedTopicId(topic.id); setTopicAnswer(null); setActivity(`Materia selecionada: ${topic.title}`) }}>
+                  <strong>{topic.title}</strong><span>{topic.course || 'Curso nao identificado'}</span><small>{topic.dueText || 'Prazo nao encontrado'}</small>
+                </button>
+              )) : <div className="empty-box">Nenhuma materia extraida ainda.</div>}
+            </div>
+          </section>
+
+          <div className="works-layout single-column">
+            <article className="topic-detail clean">
+              {selectedTopic ? (viewMode === 'user' ? (
+                <>
+                  <div className="topic-hero user-hero">
+                    <div>
+                      <p className="eyebrow">Materia selecionada</p>
+                      <h3>{selectedTopic.title}</h3>
+                      <p className="topic-subtitle">{selectedTopic.course || 'Curso nao identificado'} · {selectedTopic.dueText || 'Prazo nao encontrado'}</p>
+                    </div>
+                  </div>
+                  <div className="user-focus-grid">
+                    <div className="meta-card clean-card user-summary-card"><span>Resumo</span><p className="rich-paragraph">{topicSummary?.summary || selectedTopic.summary || 'Resumo ainda nao disponivel para esta materia.'}</p></div>
+                    <div className="meta-card clean-card user-todo-card"><span>Entregaveis</span><div className="user-list">{compactTopicItems(selectedTopic.agentMemory?.deliverables).length > 0 ? compactTopicItems(selectedTopic.agentMemory?.deliverables).map((item) => <p key={item}>{item}</p>) : <p>Abra o anexo principal e confirme os entregaveis desta materia.</p>}</div></div>
+                    <div className="meta-card clean-card user-deadline-card"><span>Prazo</span><div className="user-list"><p>{selectedTopic.dueText || 'Prazo nao encontrado.'}</p>{compactTopicItems(selectedTopic.agentMemory?.deadlines, 2).map((item) => <p key={item}>{item}</p>)}</div></div>
+                    <div className="meta-card clean-card user-files-card"><span>Arquivos</span><div className="download-list">{selectedTopic.attachments.length > 0 ? selectedTopic.attachments.slice(0, 3).map((attachment) => <a key={attachment.path} className="download-chip" href={buildBotFileUrl(attachment.path)} target="_blank" rel="noreferrer">{attachment.name}</a>) : <span className="placeholder-text">Nenhum anexo registrado.</span>}</div></div>
+                  </div>
+                  <div className="meta-card clean-card user-ask-card">
+                    <span>Pergunte sobre esta materia</span>
+                    <textarea value={topicQuestion} onChange={(event) => setTopicQuestion(event.target.value)} placeholder="Ex.: o que preciso entregar? qual parte merece mais atencao?" rows={3} />
+                    <div className="action-row"><button type="button" className="primary-button" disabled={topicBusy !== null} onClick={() => void handleAskTopic()}>{topicBusy === 'ask' ? 'Perguntando...' : 'Perguntar ao agente'}</button></div>
+                    <p className="rich-paragraph">{topicAnswer?.answer || 'A resposta contextual do agente aparecera aqui.'}</p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="topic-hero">
+                    <div>
+                      <p className="eyebrow">Materia selecionada</p>
+                      <h3>{selectedTopic.title}</h3>
+                      <p className="topic-subtitle">{selectedTopic.course || 'Curso nao identificado'} · {selectedTopic.dueText || 'Prazo nao encontrado'} · {selectedTopic.status}</p>
+                      <div className="topic-badges inline">
+                        <span className="topic-badge">{selectedTopic.moduleKey}</span>
+                        <span className="topic-badge">{selectedTopic.summaryGeneratedAt ? 'Resumo salvo' : 'Sem resumo'}</span>
+                        <span className="topic-badge">{selectedTopic.agentMemoryGeneratedAt ? 'Agente pronto' : 'Memoria pendente'}</span>
+                      </div>
+                    </div>
+                    <div className="action-row">
+                      <button type="button" className="secondary-button" disabled={topicBusy !== null} onClick={() => void handleGenerateSummary(true)}>{topicBusy === 'summary' ? 'Gerando resumo...' : selectedTopic.summary ? 'Regenerar resumo' : 'Gerar resumo'}</button>
+                      <button type="button" className="primary-button" disabled={topicBusy !== null} onClick={() => void handleGenerateMemory(true)}>{topicBusy === 'memory' ? 'Gerando memoria...' : selectedTopic.agentMemory ? 'Regenerar agente' : 'Gerar agente'}</button>
+                    </div>
+                  </div>
+                  <div className="topic-main-grid">
+                    <section className="topic-visual-panel">
+                      <div className="section-heading"><strong>Screenshot da lista real</strong><span>{selectedTopic.screenshots.length > 0 ? `${selectedTopic.screenshots.length} captura(s)` : 'Sem captura ainda'}</span></div>
+                      <div className="screenshot-frame">{selectedTopic.screenshots[0] ? <img src={buildBotFileUrl(selectedTopic.screenshots[0])} alt={`Screenshot do topico ${selectedTopic.title}`} className="topic-screenshot" /> : <div className="empty-box">Ainda nao existe screenshot vinculada a este topico.</div>}</div>
+                    </section>
+                    <section className="topic-info-stack">
+                      <div className="meta-card clean-card"><span>Resumo persistido</span><p className="rich-paragraph">{topicSummary?.summary || selectedTopic.summary || 'Este topico ainda nao tem resumo salvo.'}</p></div>
+                      <div className="meta-card clean-card"><span>Anexos e conteudo isolado</span><div className="download-list">{selectedTopic.attachments.length > 0 ? selectedTopic.attachments.map((attachment) => <a key={attachment.path} className="download-chip" href={buildBotFileUrl(attachment.path)} target="_blank" rel="noreferrer">{attachment.name}</a>) : <span className="placeholder-text">Nenhum anexo registrado neste topico.</span>}</div><pre className="content-preview">{selectedTopic.contentText || 'Conteudo textual ainda nao consolidado.'}</pre></div>
+                    </section>
+                  </div>
+                  <div className="topic-agent-grid">
+                    <div className="meta-card transcript-box clean-card">
+                      <span>Agente da materia</span>
+                      <p className="rich-paragraph">{selectedTopic.agentMemory?.overview || 'A memoria persistida ainda nao foi gerada para este topico.'}</p>
+                      <div className="chip-row">{(selectedTopic.agentMemory?.deliverables || []).map((item) => <span key={item} className="info-chip">{item}</span>)}</div>
+                      <textarea value={topicQuestion} onChange={(event) => setTopicQuestion(event.target.value)} placeholder="Ex.: o que preciso entregar? qual parte merece mais atencao?" rows={4} />
+                      <div className="action-row">
+                        <button type="button" className="primary-button" disabled={topicBusy !== null} onClick={() => void handleAskTopic()}>{topicBusy === 'ask' ? 'Perguntando...' : 'Perguntar ao agente'}</button>
+                        <button type="button" className="secondary-button" disabled={topicBusy !== null} onClick={() => void handleGenerateMemory(false)}>Atualizar memoria salva</button>
+                      </div>
+                      <p className="rich-paragraph">{topicAnswer?.answer || 'A resposta contextual do agente aparecera aqui.'}</p>
+                    </div>
+                    <div className="meta-card transcript-box clean-card">
+                      <span>Debug do topico</span>
+                      <div className="log-lines tall">{topicDebugEvents.length > 0 ? topicDebugEvents.map((event) => <code key={event.id} className="log-line">[{formatTimestamp(event.ts)}] {event.endpoint} topic={event.topicId || 'sem-topico'} status={event.statusCode} duracao={event.durationMs}ms{event.error ? ` erro=${event.error}` : ''}{'\n'}request={safeJson(event.request)}{'\n'}response={safeJson(event.response)}</code>) : <span className="placeholder-text">Nenhum evento do LLM foi registrado para este topico ainda.</span>}</div>
+                    </div>
+                  </div>
+                </>
+              )) : <div className="empty-box">{topicBusy === 'detail' ? 'Carregando detalhes do topico...' : 'Selecione uma materia na faixa superior para abrir o conteudo.'}</div>}
+            </article>
           </div>
-        </aside>
+        </section>
+      )}
+
+      <section className="footer-card compact-footer">
+        <p className="eyebrow">Atividade</p>
+        <strong>{activity}</strong>
+        {viewMode === 'admin' ? (
+          <div className="log-panel">
+            <span>Log da automacao</span>
+            <div className="log-lines">{botState.logs.length > 0 ? botState.logs.map((line) => <code key={line} className="log-line">{line}</code>) : <span className="placeholder-text">Nenhum log registrado ainda.</span>}</div>
+          </div>
+        ) : null}
       </section>
     </main>
   )
 }
 
-export default App
+function StatusCard({ label, value }: { label: string; value: string }) {
+  return <div className="status-card"><span>{label}</span><strong>{value}</strong></div>
+}
+
+function compactTopicItems(items: string[] | undefined, limit = 3) {
+  return (items ?? []).map((item) => item.replace(/\s+/g, ' ').trim()).filter(Boolean).map((item) => truncateText(item, 140)).slice(0, limit)
+}
+
+function truncateText(value: string, maxLength: number) {
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1).trim()}...`
+}
+
+function mapBotState(data: {
+  jobs: BotState['jobs']
+  readyLessons: BotState['readyLessons']
+  workspaceReport: { authStatus: BotState['authStatus']; liveMeetings: BotState['liveMeetings']; assignments: BotState['assignments']; scannedAt: string }
+  topics: BotState['topics']
+  logs: string[]
+  llm?: BotState['llm']
+  llmDebug?: BotState['llmDebug']
+  runtimeError?: string
+}) {
+  return {
+    jobs: data.jobs,
+    readyLessons: data.readyLessons,
+    liveMeetings: data.workspaceReport.liveMeetings,
+    assignments: data.workspaceReport.assignments,
+    topics: data.topics,
+    logs: data.logs,
+    authStatus: data.workspaceReport.authStatus,
+    scannedAt: data.workspaceReport.scannedAt,
+    apiConnected: true,
+    llm: data.llm ?? emptyBotState.llm,
+    llmDebug: data.llmDebug ?? emptyBotState.llmDebug,
+    runtimeError: data.runtimeError ?? '',
+  } satisfies BotState
+}
+
+function formatTimestamp(value: string) {
+  return new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value))
+}
+
+function explainRuntimeError(error: string) {
+  if (error === 'teams_login_required') return 'O Teams ainda nao esta autenticado. Clique em "Conectar Teams", conclua o login e tente novamente.'
+  if (error === 'teams_browser_closed') return 'A janela do Teams foi fechada durante a automacao. Reabra com "Conectar Teams" e tente novamente.'
+  if (error === 'assignments_view_not_loaded') return 'O bot abriu o Teams, mas nao conseguiu confirmar a tela de Atribuicoes.'
+  return `Falha na automacao: ${error}`
+}
+
+function safeJson(value: unknown) {
+  try { return JSON.stringify(value) } catch { return String(value) }
+}
