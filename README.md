@@ -1,164 +1,109 @@
-# FIAPAUTO
+# FIAPAUTO v0.2
 
-FIAPAUTO e a base de um produto para apoiar o curso de IA da FIAP com automacao de aulas, organizacao academica e acompanhamento inteligente do estudo.
+FIAPAUTO e um assistente academico focado em transformar atividades extraidas do Microsoft Teams em uma experiencia util para o aluno.
 
-## Visao do produto
+Hoje o projeto ja consegue:
+- extrair trabalhos e anexos do Teams
+- organizar topicos por materia
+- gerar resumo, memoria e aprendizado automatico por atividade
+- responder perguntas contextuais com fallback local e suporte a LLM em nuvem
+- oferecer uma experiencia separada por modulos de `Aulas`, `Trabalhos` e `Aprendizado`
 
-O objetivo do projeto e concentrar em um unico sistema:
+## Visao do Produto
+O objetivo do FIAPAUTO nao e so listar trabalhos. A ideia e entregar um copiloto academico que ajude o aluno a:
+- entender rapidamente o que a atividade pede
+- saber o que entregar e como comecar
+- tirar duvidas frequentes sem ler tudo do zero
+- abrir o PDF original em um clique quando quiser validar manualmente
 
-- gravacao automatica das aulas
-- transcricao de audio para texto
-- resumo com topicos-chave e proximos passos
-- organizacao de materiais, links, tarefas e entregas
-- recomendacoes de estudo personalizadas
-- analise de fragilidades por tema, disciplina ou habilidade
+## Estado Atual da v0.2
+- Novo motor hibrido para respostas contextuais
+- Melhor tratamento de topicos numerados como `item 4`
+- UI do aluno mais amigavel
+- Nova aba de `Aprendizado` gerada automaticamente por atividade
+- Melhor limpeza de resumo, prazo e entregaveis
+- Acesso rapido ao PDF principal
 
-## Stack inicial
+## Arquitetura
+```text
+frontend/
+  layout/
+  engineweb/
+  features/
+backend/
+  apis/
+  automations/
+  bots/
+  connections/
+  engine/
+  runtime/        # local, ignorado no Git
+utilities/
+docs/
+```
 
-- React 19
-- TypeScript
-- Vite
-- CSS customizado
-- Persistencia local com `localStorage`
-- Pipeline desacoplado em camada de servico demo
+Workspaces principais:
+- `@fiapauto/frontend`
+- `@fiapauto/backend`
+- `@fiapauto/bots`
 
 ## Como rodar
-
 ```bash
 npm install
 npm run dev
 ```
 
-Agora `npm run dev` sobe:
-
-- frontend do site
-- API local do bot
-
-Portas usadas por este projeto:
-
-- webapp: `127.0.0.1:43871`
-- API local: `127.0.0.1:43872`
-
-Com isso, o teste do bot pode ser feito direto pela interface do site no modulo `Bot`.
-
-Ou, no Windows, execute:
-
-```bat
-launch.bat
-```
-
-Tambem existe a versao PowerShell:
-
-```powershell
-.\launch.ps1
-```
-
-Agora tambem existe um orquestrador em Python com painel de console e logs em tempo real:
-
+Comandos principais:
 ```bash
-python launcher.py
-```
-
-O launcher sobe a API e o frontend, acompanha a saida em tempo real, monitora o arquivo `bot/output/automation.log` e exibe tudo em um painel colorido com atalhos:
-
-- `o`: abre o site no navegador
-- `a`: reinicia a API
-- `w`: reinicia o frontend
-- `b`: liga ou desliga o worker do bot
-- `r`: reinicia todos os servicos ativos
-- `q`: encerra o launcher
-
-## Bot de gravacao
-
-O projeto agora tem um esqueleto isolado para o bot de aulas no Microsoft Teams usando Playwright.
-
-```bash
+npm run dev
+npm run build
+npm run lint
 npm run bot:test
-```
-
-Esse comando executa um teste rapido com fixture local e gera artefatos em `bot/output`.
-
-Tambem e possivel testar pelo proprio site:
-
-1. rode `npm run dev`
-2. abra `http://127.0.0.1:43871`
-3. entre no modulo `Bot`
-4. clique em `Executar bot demo`
-5. a aula gerada aparece no site pronta para transcricao
-
-Para rodar em modo worker:
-
-```bash
 npm run bot:worker
 ```
 
-## Assistente de atribuicoes com LLM
+## Screenshots
+### Home / identidade
+![Hero](docs/assets/hero.png)
 
-O projeto agora consegue usar um servico LLM HTTP no mesmo estilo ja usado no `lojasync`.
+### Captura do Teams
+![Teams Workspace](docs/assets/teams-workspace.png)
 
-Configuracao por variaveis de ambiente:
+### Lista de atividade extraida
+![Checkpoint List](docs/assets/checkpoint-1-list.png)
 
-- `LLM_BASE_URL`: URL base do servico compatível com Ollama
-- `LLM_API_KEY`: token Bearer do servico, quando necessario
-- `LLM_MODEL`: nome do modelo, opcional
-- `LLM_HTTP_TIMEOUT_MS`: timeout das chamadas HTTP
+### Detalhe de atividade e assistente
+![Checkpoint Detail](docs/assets/checkpoint-1-detail.png)
 
-Se essas variaveis nao estiverem definidas, o projeto tenta reaproveitar as chaves ja cadastradas em:
+### Outro exemplo de materia
+![Cloud Security Detail](docs/assets/cloud-security-detail.png)
 
-- `C:\Users\user\Desktop\lojasync\Legacy\engine\LLM3\keys.py`
+## Fluxo Atual
+1. O bot captura trabalhos e anexos do Teams.
+2. O backend cria ou atualiza um `SubjectTopic`.
+3. O sistema gera `summary`, `agentMemory` e `learning` automaticamente.
+4. O frontend exibe:
+   - resumo
+   - entregaveis
+   - prazo
+   - arquivos
+   - chat contextual
+   - aba de aprendizado
 
-Nesse caso, o `FIAPAUTO` passa a usar `https://ollama.com` automaticamente, seguindo a mesma logica do `lojasync`.
+## Seguranca e Proximo Passo Estrutural
+Hoje ainda existe divisao de interface entre `usuario` e `admin` no mesmo app. O proximo passo recomendado e separar:
+- webapp publico do aluno
+- webapp admin privado
+- rotas e backend admin protegidos
 
-Exemplo no PowerShell antes de rodar o projeto:
+## Para Onde Estamos Indo
+O roadmap imediato do projeto e:
+- separar app `admin` e app `user`
+- melhorar a qualidade automatica do `Aprendizado`
+- limpar ainda mais a memoria persistida por topico
+- melhorar extracao de entregaveis e datas em todos os tipos de atividade
+- preparar deploy do app publico em nuvem
 
-```powershell
-$env:LLM_BASE_URL="https://seu-servico-ollama-cloud"
-$env:LLM_API_KEY="seu-token"
-$env:LLM_MODEL="qwen2.5:7b-instruct"
-npm run dev
-```
-
-Fluxo disponivel na aba `Trabalhos`:
-
-1. conectar o Teams
-2. executar a varredura
-3. selecionar uma atribuicao
-4. clicar em `Resumir com LLM`
-5. fazer perguntas sobre a atribuicao no painel do assistente
-
-Endpoints locais adicionados:
-
-- `POST /api/assistant/summary`
-- `POST /api/assistant/ask`
-
-## Roadmap inicial
-
-1. Definir arquitetura de captura e ingestao das aulas.
-2. Escolher pipeline de transcricao e sumarizacao.
-3. Estruturar o dashboard principal com dados reais.
-4. Evoluir para uma camada de recomendacao e analise de desempenho.
-
-## MVP atual
-
-O projeto agora possui uma demo funcional ponta a ponta no frontend:
-
-- cadastro manual de aulas
-- simulacao de gravacao
-- transcricao assincrona via servico demo
-- geracao de resumo e fragilidades via servico demo
-- organizacao de materiais e tarefas por aula
-- persistencia local para manter o estado da demo entre recarregamentos
-
-## Estrutura do projeto
-
-- `src/App.tsx`: dashboard principal e interacoes
-- `src/types.ts`: entidades principais do MVP
-- `src/lib/demoPipeline.ts`: camada de servico para transcricao e resumo
-- `src/lib/storage.ts`: persistencia local
-- `docs/PROJECT_BRIEF.md`: alinhamento rapido para equipe
-- `docs/BOT_MODULE.md`: estrutura inicial do bot de gravacao
-- `bot/`: modulo isolado do worker de automacao para Teams
-
-## Colaboracao
-
-Projeto pensado para trabalho em equipe desde o inicio, com repositorio GitHub e uma UI inicial para alinhar produto, backlog e visao.
+## Documentacao Relacionada
+- [Patch Notes v0.2](patchnotes.md)
+- [Plano de inteligencia de atribuicoes](docs/ASSIGNMENTS_INTELLIGENCE_PLAN.md)
+- [Modulo do bot](docs/BOT_MODULE.md)

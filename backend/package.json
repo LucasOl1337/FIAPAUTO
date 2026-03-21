@@ -1,0 +1,16 @@
+{
+  "name": "@fiapauto/backend",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "exports": {
+    "./contracts": "./apis/contracts/index.ts"
+  },
+  "dependencies": {
+    "@fiapauto/bots": "0.2.0"
+  },
+  "scripts": {
+    "dev": "tsx apis/server.ts",
+    "build": "tsc --noEmit -p tsconfig.json"
+  }
+}

@@ -6,9 +6,14 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores([
+    '**/dist',
+    '**/node_modules',
+    'backend/runtime',
+    '__pycache__',
+  ]),
   {
-    files: ['src/**/*.{ts,tsx}'],
+    files: ['frontend/**/*.{ts,tsx}'],
     extends: [
       js.configs.recommended,
       tseslint.configs.recommended,
@@ -21,7 +26,7 @@ export default defineConfig([
     },
   },
   {
-    files: ['bot/src/**/*.ts', 'server/**/*.ts', 'vite.config.ts'],
+    files: ['backend/**/*.ts'],
     extends: [js.configs.recommended, tseslint.configs.recommended],
     languageOptions: {
       ecmaVersion: 2020,

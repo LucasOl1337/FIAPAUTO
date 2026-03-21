@@ -1,3 +1,11 @@
+# Dependencies and build output
+node_modules
+dist
+dist-ssr
+frontend/dist
+backend/runtime
+bot/session
+
 # Logs
 logs
 *.log
@@ -7,16 +15,11 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
+# Local and generated files
 *.local
-bot/output
-bot/session
-output
-server/llmKeys.local.py
-launcher-smoke.err
-launcher-smoke.out
+*.local.py
+*.pyc
+__pycache__/
 
 # Editor directories and files
 .vscode/*
@@ -28,5 +31,3 @@ launcher-smoke.out
 *.njsproj
 *.sln
 *.sw?
-__pycache__/
-*.pyc

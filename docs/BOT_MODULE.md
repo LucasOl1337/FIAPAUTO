@@ -6,11 +6,12 @@ Automatizar o fluxo:
 `aula agendada -> entrada no Teams -> gravacao -> upload -> pronto para transcricao`
 
 ## Estrutura
-- `bot/src/core`: scheduler e orquestracao do job
-- `bot/src/platforms/teams`: adapter de automacao via Playwright
-- `bot/src/services`: gravacao, upload e persistencia local
-- `bot/src/config.ts`: configuracao base e jobs demo
-- `bot/fixtures/mock-teams-meeting.html`: pagina local para teste rapido
+- `backend/automations`: scheduler, runtime e entrada do worker
+- `backend/bots/src/core`: orquestracao do job
+- `backend/bots/src/platforms/teams`: automacao via Playwright
+- `backend/bots/src/services`: gravacao, upload e servicos do bot
+- `backend/bots/src/config.ts`: configuracao base e jobs demo
+- `backend/bots/fixtures/mock-teams-meeting.html`: pagina local para teste rapido
 
 ## Comandos
 ```bash
@@ -27,11 +28,11 @@ npm run bot:worker
 - marca a aula como pronta para transcricao
 
 ## Pastas de saida
-- `bot/output/jobs-state.json`
-- `bot/output/ready-lessons.json`
-- `bot/output/recordings`
-- `bot/output/uploads`
-- `bot/output/screenshots`
+- `backend/runtime/jobs/jobs-state.json`
+- `backend/runtime/jobs/ready-lessons.json`
+- `backend/runtime/recordings`
+- `backend/runtime/uploads`
+- `backend/runtime/screenshots`
 
 ## Proximos passos
 1. Trocar fixture por login real no Teams.

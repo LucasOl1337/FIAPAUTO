@@ -12,10 +12,10 @@ O projeto ja possui um fluxo inicial de captura de atribuicoes no Teams:
 
 Hoje isso passa principalmente por:
 
-- `bot/src/platforms/teams/TeamsMeetingAdapter.ts`
-- `bot/src/services/TeamsWorkspaceStore.ts`
-- `bot/output/assignments-report.json`
-- `bot/output/downloads/atribuicoes/...`
+- `backend/bots/src/platforms/teams/TeamsMeetingAdapter.ts`
+- `backend/database/TeamsWorkspaceStore.ts`
+- `backend/runtime/jobs/assignments-report.json`
+- `backend/runtime/downloads/...`
 
 ## Objetivo da proxima etapa
 
@@ -40,11 +40,11 @@ Responsavel por continuar fazendo o que o bot ja faz hoje:
 
 Saidas recomendadas:
 
-- `output/assignments/raw/assignments-report.json`
-- `output/assignments/raw/<assignment-id>/metadata.json`
-- `output/assignments/raw/<assignment-id>/attachments/...`
-- `output/assignments/raw/<assignment-id>/page.html` quando possivel
-- `output/assignments/raw/<assignment-id>/screenshot.png` opcional
+- `backend/runtime/assignments/raw/assignments-report.json`
+- `backend/runtime/assignments/raw/<assignment-id>/metadata.json`
+- `backend/runtime/assignments/raw/<assignment-id>/attachments/...`
+- `backend/runtime/assignments/raw/<assignment-id>/page.html` quando possivel
+- `backend/runtime/assignments/raw/<assignment-id>/screenshot.png` opcional
 
 ### 2. Camada de normalizacao
 
@@ -64,7 +64,7 @@ Formato sugerido:
   "attachments": [
     {
       "fileName": "enunciado.pdf",
-      "path": "output/assignments/raw/atrib-001/attachments/enunciado.pdf",
+      "path": "backend/runtime/assignments/raw/atrib-001/attachments/enunciado.pdf",
       "mimeType": "application/pdf"
     }
   ],
@@ -86,8 +86,8 @@ Prioridade:
 
 Saida:
 
-- `output/assignments/processed/<assignment-id>/content.json`
-- `output/assignments/processed/<assignment-id>/fulltext.txt`
+- `backend/runtime/assignments/processed/<assignment-id>/content.json`
+- `backend/runtime/assignments/processed/<assignment-id>/fulltext.txt`
 
 ### 4. Camada de classificacao por modulo
 
@@ -109,8 +109,8 @@ Depois evoluir para classificacao semantica local.
 
 Saidas:
 
-- `output/assignments/index/modules.json`
-- `output/assignments/index/by-module/<moduleKey>.json`
+- `backend/runtime/assignments/index/modules.json`
+- `backend/runtime/assignments/index/by-module/<moduleKey>.json`
 
 ### 5. Camada de resumo
 
@@ -235,10 +235,10 @@ Cada modulo pode ter:
 
 Estrutura sugerida:
 
-- `output/knowledge/modules/fundamentos/...`
-- `output/knowledge/modules/backend/...`
-- `output/knowledge/modules/ia-aplicada/...`
-- `server/knowledge/module-prompts/<moduleKey>.md`
+- `backend/runtime/knowledge/modules/fundamentos/...`
+- `backend/runtime/knowledge/modules/backend/...`
+- `backend/runtime/knowledge/modules/ia-aplicada/...`
+- `backend/engine/module-prompts/<moduleKey>.md`
 
 ## Pipeline tecnico sugerido
 
