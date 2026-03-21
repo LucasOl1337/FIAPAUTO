@@ -10,7 +10,7 @@ import { getAccessToken, isCognitoConfigured } from '../auth/cognito.ts'
 import { askOllamaCloudTopic } from './ollamaCloud.ts'
 import { answerPublishedTopicQuestion } from './publicAssistant.ts'
 
-const PUBLIC_API_TUNNEL = 'https://sixty-needles-read.loca.lt'
+const PUBLIC_API_TUNNEL = 'https://exhibitions-sale-divide-dir.trycloudflare.com'
 const PUBLIC_API_BASE = resolvePublicApiBase()
 const STATIC_PUBLIC_BASE = '/published'
 
