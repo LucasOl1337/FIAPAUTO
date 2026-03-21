@@ -192,6 +192,7 @@ async function invokeProvider(
       apiKey: keyMeta.value,
       model: provider.model ?? 'gpt-oss:20b',
       prompt: buildGeminiPrompt(request),
+      images: request.images,
       timeoutMs: provider.timeoutMs,
       baseUrl: provider.baseUrl,
     })

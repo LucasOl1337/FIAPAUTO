@@ -24,6 +24,11 @@ export async function postOllamaChat(input: {
   apiKey: string
   model: string
   prompt: string
+  images?: Array<{
+    data?: string
+    mime?: string
+    name?: string
+  }>
   timeoutMs?: number
   baseUrl?: string
 }) {
@@ -40,6 +45,13 @@ export async function postOllamaChat(input: {
         {
           role: 'user',
           content: input.prompt,
+          ...(input.images?.some((item) => item.data)
+            ? {
+                images: input.images
+                  .map((item) => item.data?.trim() ?? '')
+                  .filter(Boolean),
+              }
+            : {}),
         },
       ],
       stream: false,

@@ -17,7 +17,13 @@ import {
   type TopicAskResult,
   type TopicSummaryResult,
 } from './api/botApi.ts'
-import { askPublicTopic, buildPublicAssetUrl, fetchPublicTopic, fetchPublicTopics } from './api/publicApi.ts'
+import {
+  askPublicTopic,
+  buildPublicAssetUrl,
+  fetchPublicTopic,
+  fetchPublicTopics,
+  type PublicTopicChatResult,
+} from './api/publicApi.ts'
 import { initialWorkspaceState } from './state/demoData.ts'
 import { loadWorkspaceState, resetWorkspaceState, saveWorkspaceState } from './state/storage.ts'
 import type { WorkspaceState } from './types.ts'
@@ -708,7 +714,7 @@ function mapPublishedTopicToTopic(topic: PublicTopic): SubjectTopic {
 }
 
 function normalizePublicChatResult(
-  payload: Awaited<ReturnType<typeof askPublicTopic>>,
+  payload: PublicTopicChatResult,
   moduleKey: string,
 ): TopicAskResult {
   return {
@@ -716,12 +722,17 @@ function normalizePublicChatResult(
     answer: payload.answer,
     moduleKey,
     warnings: [],
-    usedFallback: false,
+    usedFallback: payload.providerUsed === 'local',
     answeredAt: payload.answeredAt,
     confidence: payload.confidence,
-    strategyUsed: payload.strategyUsed === 'memory' ? 'memory' : 'deterministic',
-    providerUsed: 'local',
-    fallbackLevel: 0,
+    strategyUsed:
+      payload.strategyUsed === 'memory'
+        ? 'memory'
+        : payload.strategyUsed === 'rag_llm'
+          ? 'rag_llm'
+          : 'deterministic',
+    providerUsed: payload.providerUsed,
+    fallbackLevel: payload.fallbackLevel ?? (payload.providerUsed === 'local' ? 1 : 0),
     citations: payload.citations,
     suggestedQuestions: payload.suggestedQuestions,
     nextSteps: payload.nextSteps,

@@ -235,8 +235,9 @@ export type PublicChatResponse = {
   topicId: string
   answer: string
   confidence: 'high' | 'medium' | 'low'
-  strategyUsed: 'memory' | 'deterministic'
-  providerUsed: 'local'
+  strategyUsed: 'memory' | 'rag_llm' | 'provider_fallback' | 'deterministic'
+  providerUsed: 'ollama' | 'gemini' | 'local'
+  fallbackLevel?: number
   citations: Array<{
     sourceType: 'summary' | 'faq' | 'deadline' | 'deliverable' | 'content'
     sourceLabel: string
