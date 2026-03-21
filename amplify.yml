@@ -2,6 +2,7 @@ version: 1
 applications:
   - appRoot: frontend
     frontend:
+      buildPath: /
       phases:
         preBuild:
           commands:
@@ -10,7 +11,7 @@ applications:
           commands:
             - npm run build -w @fiapauto/frontend
       artifacts:
-        baseDirectory: dist
+        baseDirectory: frontend/dist
         files:
           - '**/*'
       cache:
