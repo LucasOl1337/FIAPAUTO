@@ -43,10 +43,11 @@ export async function fetchPublicManifest() {
 }
 
 export async function fetchPublicTopics() {
-  return fetchWithStaticFallback<{ topics: PublicTopicListItem[] }>({
+  return fetchWithStaticFallback<{ topics: PublicTopicListItem[] }, PublicTopicListItem[]>({
     apiPath: '/api/public/topics',
     staticPath: '/topics.json',
     errorCode: 'public_topics_failed',
+    transformStatic: (topics) => ({ topics }),
   })
 }
 
