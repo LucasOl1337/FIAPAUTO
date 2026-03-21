@@ -88,7 +88,7 @@ export async function askPublicTopic(input: { topicId: string; question: string 
 
 export async function fetchPublicSyncStatus() {
   try {
-    return await fetchWithStaticFallback<PublicSyncStatus>({
+    return await fetchWithStaticFallback<PublicSyncStatus, PublicManifest>({
       apiPath: '/api/public/sync/status',
       staticPath: '/manifest.json',
       errorCode: 'public_sync_status_failed',
