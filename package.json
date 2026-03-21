@@ -21,6 +21,7 @@
     "publish:push": "npm run publish:push -w @fiapauto/backend",
     "publish:pull": "npm run publish:pull -w @fiapauto/backend",
     "publish:status": "npm run publish:status -w @fiapauto/backend",
+    "publish:embed": "node utilities/scripts/sync-public-bundle.mjs",
     "cloud:build:public-api": "node aws/scripts/build-public-api.mjs",
     "cloud:zip:public-api": "bestzip aws/dist/public-api.zip aws/dist/public-api/*",
     "cloud:prepare:public-api": "npm run cloud:build:public-api && npm run cloud:zip:public-api",

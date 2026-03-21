@@ -1,0 +1,65 @@
+{
+  "id": "checkpoint-2-scwr-p",
+  "title": "Checkpoint 2: SCWR&P",
+  "course": "1TIAPF-2026",
+  "moduleKey": "ia-aplicada",
+  "status": "upcoming",
+  "dueText": "Prazo de entrega às 23:59",
+  "summary": "",
+  "agentMemory": null,
+  "learning": {
+    "frequentQuestions": [
+      {
+        "question": "O que preciso entregar?",
+        "answer": "Os entregaveis nao ficaram totalmente claros no material, entao vale abrir o anexo principal para confirmar."
+      },
+      {
+        "question": "Qual e o prazo dessa atividade?",
+        "answer": "A data exata nao apareceu no material salvo. Abra o anexo principal e confira a data na atividade original."
+      },
+      {
+        "question": "Como comeco esse trabalho?",
+        "answer": "Primeiro, entenda o objetivo central de Checkpoint 2: SCWR&P pelo resumo do trabalho. Depois, abra o anexo principal e anote os entregaveis e formatos exigidos. Por fim, confirme manualmente a data no PDF principal antes de enviar."
+      },
+      {
+        "question": "O que pode me fazer perder pontos?",
+        "answer": "Os criterios de perda de pontos nao ficaram totalmente objetivos no material salvo, entao vale conferir o anexo principal."
+      }
+    ],
+    "simpleConcepts": [
+      {
+        "title": "Como entender a atividade",
+        "content": "Objetivo: Checkpoint 2: SCWR&P.\nEntregaveis: Arquivo \"Checkpoint 2.docx.pdf\"; Titulo: Checkpoint 2: SCWR&P\nCurso: 1TIAPF-2026\nStatus: upcoming\nPrazo: Prazo de entrega às 23:59\nLink de detalhe: https://teams.microsoft.com/v2/\nModulo sugerido: ia-aplicada\nArquivos baixados: Checkpoint 2.docx.pdf\nPrazo: Prazo de entrega às 23:59\nCurso: 1TIAPF-2026. Status: upcoming.\nPontos de atencao: consulte os anexos e a screenshot da atividade para confirmar os detalhes."
+      },
+      {
+        "title": "O que entregar na pratica",
+        "content": "Comece identificando os arquivos e formatos exigidos no enunciado principal."
+      },
+      {
+        "title": "Como resolver sem se perder",
+        "content": "Primeiro, entenda o objetivo central de Checkpoint 2: SCWR&P pelo resumo do trabalho. Depois, abra o anexo principal e anote os entregaveis e formatos exigidos. Por fim, confirme manualmente a data no PDF principal antes de enviar."
+      },
+      {
+        "title": "Cuidados importantes",
+        "content": "Revise o enunciado, confirme formato, prazo e regras da submissao antes de enviar."
+      }
+    ],
+    "quickTips": [
+      "Confirme a data no PDF principal para nao depender so do resumo."
+    ]
+  },
+  "attachments": [
+    {
+      "path": "assets/attachments/checkpoint-2-scwr-p/checkpoint-2-docx-36174dcf8d.pdf",
+      "key": "assets/attachments/checkpoint-2-scwr-p/checkpoint-2-docx-36174dcf8d.pdf",
+      "name": "Checkpoint 2.docx.pdf",
+      "contentType": "application/pdf",
+      "size": 148066
+    }
+  ],
+  "screenshots": [
+    "assets/screenshots/checkpoint-2-scwr-p/checkpoint-2-scwr-p-list-0aad0173b5.png",
+    "assets/screenshots/checkpoint-2-scwr-p/checkpoint-2-scwr-p-detail-19fa078aa1.png"
+  ],
+  "updatedAt": "2026-03-21T16:42:54.043Z"
+}

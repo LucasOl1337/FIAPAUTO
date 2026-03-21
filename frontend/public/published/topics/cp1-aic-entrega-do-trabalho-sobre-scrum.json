@@ -1,0 +1,57 @@
+{
+  "id": "cp1-aic-entrega-do-trabalho-sobre-scrum",
+  "title": "CP1 - AIC - Entrega do trabalho sobre Scrum",
+  "course": "1TIAPF-2026",
+  "moduleKey": "ia-aplicada",
+  "status": "upcoming",
+  "dueText": "Prazo de entrega às 23:55",
+  "summary": "",
+  "agentMemory": null,
+  "learning": {
+    "frequentQuestions": [
+      {
+        "question": "O que preciso entregar?",
+        "answer": "Os entregaveis nao ficaram totalmente claros no material, entao vale abrir o anexo principal para confirmar."
+      },
+      {
+        "question": "Qual e o prazo dessa atividade?",
+        "answer": "A data exata nao apareceu no material salvo. Abra o anexo principal e confira a data na atividade original."
+      },
+      {
+        "question": "Como comeco esse trabalho?",
+        "answer": "Primeiro, entenda o objetivo central de CP1 - AIC - Entrega do trabalho sobre Scrum pelo resumo do trabalho. Depois, abra o anexo principal e anote os entregaveis e formatos exigidos. Por fim, confirme manualmente a data no PDF principal antes de enviar."
+      },
+      {
+        "question": "O que pode me fazer perder pontos?",
+        "answer": "Os criterios de perda de pontos nao ficaram totalmente objetivos no material salvo, entao vale conferir o anexo principal."
+      }
+    ],
+    "simpleConcepts": [
+      {
+        "title": "Como entender a atividade",
+        "content": "Objetivo: CP1 - AIC - Entrega do trabalho sobre Scrum.\nEntregaveis: Titulo: CP1 - AIC - Entrega do trabalho sobre Scrum\nCurso: 1TIAPF-2026\nStatus: upcoming\nPrazo: Prazo de entrega às 23:55\nLink de detalhe: https://teams.microsoft.com/v2/\nModulo sugerido: ia-aplicada\nArquivos baixados: nenhum\nPrazo: Prazo de entrega às 23:55\nCurso: 1TIAPF-2026. Status: upcoming.\nPontos de atencao: consulte os anexos e a screenshot da atividade para confirmar os detalhes."
+      },
+      {
+        "title": "O que entregar na pratica",
+        "content": "Comece identificando os arquivos e formatos exigidos no enunciado principal."
+      },
+      {
+        "title": "Como resolver sem se perder",
+        "content": "Primeiro, entenda o objetivo central de CP1 - AIC - Entrega do trabalho sobre Scrum pelo resumo do trabalho. Depois, abra o anexo principal e anote os entregaveis e formatos exigidos. Por fim, confirme manualmente a data no PDF principal antes de enviar."
+      },
+      {
+        "title": "Cuidados importantes",
+        "content": "Revise o enunciado, confirme formato, prazo e regras da submissao antes de enviar."
+      }
+    ],
+    "quickTips": [
+      "Confirme a data no PDF principal para nao depender so do resumo."
+    ]
+  },
+  "attachments": [],
+  "screenshots": [
+    "assets/screenshots/cp1-aic-entrega-do-trabalho-sobre-scrum/cp1-aic-entrega-do-trabalho-sobre-scrum-list-7cc9ae519d.png",
+    "assets/screenshots/cp1-aic-entrega-do-trabalho-sobre-scrum/cp1-aic-entrega-do-trabalho-sobre-scrum-detail-4dc699a026.png"
+  ],
+  "updatedAt": "2026-03-21T16:42:53.887Z"
+}
