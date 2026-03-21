@@ -13,9 +13,21 @@ import type {
 import type { Lesson, WorkspaceState } from '../types.ts'
 
 const BOT_API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '')
+const ADMIN_TOKEN_STORAGE_KEY = 'fiapauto.admin-token.v1'
 
 function buildApiUrl(path: string) {
   return BOT_API_BASE ? `${BOT_API_BASE}${path}` : path
+}
+
+function buildAdminHeaders(init?: HeadersInit) {
+  const token = getStoredAdminToken()
+  const headers = new Headers(init)
+
+  if (token) {
+    headers.set('X-FIAPAUTO-Admin-Token', token)
+  }
+
+  return headers
 }
 
 export type {
@@ -78,7 +90,9 @@ export function normalizeLessonTitle(title: string) {
 }
 
 export async function fetchBotStatus() {
-  const response = await fetch(buildApiUrl('/api/bot/status'))
+  const response = await fetch(buildApiUrl('/api/bot/status'), {
+    headers: buildAdminHeaders(),
+  })
   if (!response.ok) {
     throw new Error('bot_status_failed')
   }
@@ -87,7 +101,10 @@ export async function fetchBotStatus() {
 }
 
 export async function runBotDemo() {
-  const response = await fetch(buildApiUrl('/api/bot/test'), { method: 'POST' })
+  const response = await fetch(buildApiUrl('/api/bot/test'), {
+    method: 'POST',
+    headers: buildAdminHeaders(),
+  })
   if (!response.ok) {
     if (response.status === 409) {
       const payload = (await response.json()) as { error: 'scan_in_progress' } & BotStatusPayload
@@ -102,7 +119,10 @@ export async function runBotDemo() {
 }
 
 export async function resetBotDemo() {
-  const response = await fetch(buildApiUrl('/api/bot/reset'), { method: 'POST' })
+  const response = await fetch(buildApiUrl('/api/bot/reset'), {
+    method: 'POST',
+    headers: buildAdminHeaders(),
+  })
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as { error?: string } | null
     throw new Error(payload?.error || 'bot_reset_failed')
@@ -112,7 +132,10 @@ export async function resetBotDemo() {
 }
 
 export async function connectTeamsSession() {
-  const response = await fetch(buildApiUrl('/api/bot/session'), { method: 'POST' })
+  const response = await fetch(buildApiUrl('/api/bot/session'), {
+    method: 'POST',
+    headers: buildAdminHeaders(),
+  })
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as { error?: string } | null
     throw new Error(payload?.error || 'teams_session_failed')
@@ -130,12 +153,21 @@ export async function fetchTopic(topicId: string) {
   return (await response.json()) as SubjectTopic
 }
 
+export async function fetchTopics() {
+  const response = await fetch(buildApiUrl('/api/topics'))
+  if (!response.ok) {
+    throw new Error('topics_fetch_failed')
+  }
+
+  return (await response.json()) as { topics: SubjectTopic[] }
+}
+
 export async function generateTopicSummary(topicId: string, force = false) {
   const response = await fetch(buildApiUrl(`/api/topics/${encodeURIComponent(topicId)}/generate-summary`), {
     method: 'POST',
-    headers: {
+    headers: buildAdminHeaders({
       'Content-Type': 'application/json',
-    },
+    }),
     body: JSON.stringify({ force }),
   })
 
@@ -149,9 +181,9 @@ export async function generateTopicSummary(topicId: string, force = false) {
 export async function generateTopicMemory(topicId: string, force = false) {
   const response = await fetch(buildApiUrl(`/api/topics/${encodeURIComponent(topicId)}/generate-memory`), {
     method: 'POST',
-    headers: {
+    headers: buildAdminHeaders({
       'Content-Type': 'application/json',
-    },
+    }),
     body: JSON.stringify({ force }),
   })
 
@@ -182,7 +214,9 @@ export async function askTopicAssistant(input: { topicId: string; question: stri
 }
 
 export async function fetchTopicDebug(topicId: string) {
-  const response = await fetch(buildApiUrl(`/api/topics/${encodeURIComponent(topicId)}/debug`))
+  const response = await fetch(buildApiUrl(`/api/topics/${encodeURIComponent(topicId)}/debug`), {
+    headers: buildAdminHeaders(),
+  })
 
   if (!response.ok) {
     throw new Error('topic_debug_failed')
@@ -197,6 +231,33 @@ export async function fetchTopicDebug(topicId: string) {
 
 export function buildBotFileUrl(filePath: string) {
   return buildApiUrl(`/api/files?path=${encodeURIComponent(filePath)}`)
+}
+
+export function getStoredAdminToken() {
+  return window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY)?.trim() ?? ''
+}
+
+export function storeAdminToken(token: string) {
+  const normalized = token.trim()
+
+  if (!normalized) {
+    window.sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY)
+    return
+  }
+
+  window.sessionStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, normalized)
+}
+
+export async function fetchHealthStatus() {
+  const response = await fetch(buildApiUrl('/api/health'))
+  if (!response.ok) {
+    throw new Error('health_check_failed')
+  }
+
+  return (await response.json()) as {
+    ok: true
+    adminProtectionEnabled: boolean
+  }
 }
 
 function normalizeTopicAskResult(payload: Partial<TopicAskResult>) {

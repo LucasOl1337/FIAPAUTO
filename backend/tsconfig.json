@@ -18,5 +18,5 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["apis/**/*.ts", "automations/**/*.ts", "config/**/*.ts", "connections/**/*.ts", "database/**/*.ts", "engine/**/*.ts"]
+  "include": ["apis/**/*.ts", "automations/**/*.ts", "cloud/**/*.ts", "config/**/*.ts", "connections/**/*.ts", "database/**/*.ts", "engine/**/*.ts", "publish/**/*.ts", "public/**/*.ts"]
 }

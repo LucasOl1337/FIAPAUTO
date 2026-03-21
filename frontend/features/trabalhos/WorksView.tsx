@@ -1,4 +1,3 @@
-import { buildBotFileUrl } from '../../engineweb/api/botApi.ts'
 import {
   buildUserDeliverables,
   cleanTopicDisplayText,
@@ -48,7 +47,7 @@ export function WorksView({ controller }: WorksViewProps) {
     allSummarySections.find((item) => /prazo/i.test(item.label))?.text,
   )
   const primaryAttachment = controller.selectedTopic?.attachments[0] ?? null
-  const primaryAttachmentUrl = primaryAttachment ? buildBotFileUrl(primaryAttachment.path) : ''
+  const primaryAttachmentUrl = primaryAttachment ? controller.buildAssetUrl(primaryAttachment) : ''
 
   return (
     <section className="panel-card works-shell">
@@ -116,7 +115,7 @@ export function WorksView({ controller }: WorksViewProps) {
                     {primaryAttachment ? <p>Abra ou baixe o PDF principal com um clique.</p> : <p>Nenhum anexo registrado.</p>}
                   </div>
                   <div className="download-list">
-                    {controller.selectedTopic.attachments.length > 0 ? controller.selectedTopic.attachments.slice(0, 3).map((attachment) => <a key={attachment.path} className="download-chip" href={buildBotFileUrl(attachment.path)} target="_blank" rel="noreferrer">{attachment.name}</a>) : null}
+                    {controller.selectedTopic.attachments.length > 0 ? controller.selectedTopic.attachments.slice(0, 3).map((attachment) => <a key={attachment.path} className="download-chip" href={controller.buildAssetUrl(attachment)} target="_blank" rel="noreferrer">{attachment.name}</a>) : null}
                   </div>
                 </div>
               </div>
@@ -184,11 +183,11 @@ export function WorksView({ controller }: WorksViewProps) {
               <div className="topic-main-grid">
                 <section className="topic-visual-panel">
                   <div className="section-heading"><strong>Screenshot da lista real</strong><span>{controller.selectedTopic.screenshots.length > 0 ? `${controller.selectedTopic.screenshots.length} captura(s)` : 'Sem captura ainda'}</span></div>
-                  <div className="screenshot-frame">{controller.selectedTopic.screenshots[0] ? <img src={buildBotFileUrl(controller.selectedTopic.screenshots[0])} alt={`Screenshot do topico ${controller.selectedTopic.title}`} className="topic-screenshot" /> : <div className="empty-box">Ainda nao existe screenshot vinculada a este topico.</div>}</div>
+                  <div className="screenshot-frame">{controller.selectedTopic.screenshots[0] ? <img src={controller.buildAssetUrl(controller.selectedTopic.screenshots[0])} alt={`Screenshot do topico ${controller.selectedTopic.title}`} className="topic-screenshot" /> : <div className="empty-box">Ainda nao existe screenshot vinculada a este topico.</div>}</div>
                 </section>
                 <section className="topic-info-stack">
                   <div className="meta-card clean-card"><span>Resumo persistido</span><p className="rich-paragraph">{controller.topicSummary?.summary || controller.selectedTopic.summary || 'Este topico ainda nao tem resumo salvo.'}</p></div>
-                  <div className="meta-card clean-card"><span>Anexos e conteudo isolado</span><div className="download-list">{controller.selectedTopic.attachments.length > 0 ? controller.selectedTopic.attachments.map((attachment) => <a key={attachment.path} className="download-chip" href={buildBotFileUrl(attachment.path)} target="_blank" rel="noreferrer">{attachment.name}</a>) : <span className="placeholder-text">Nenhum anexo registrado neste topico.</span>}</div><pre className="content-preview">{controller.selectedTopic.contentText || 'Conteudo textual ainda nao consolidado.'}</pre></div>
+                  <div className="meta-card clean-card"><span>Anexos e conteudo isolado</span><div className="download-list">{controller.selectedTopic.attachments.length > 0 ? controller.selectedTopic.attachments.map((attachment) => <a key={attachment.path} className="download-chip" href={controller.buildAssetUrl(attachment)} target="_blank" rel="noreferrer">{attachment.name}</a>) : <span className="placeholder-text">Nenhum anexo registrado neste topico.</span>}</div><pre className="content-preview">{controller.selectedTopic.contentText || 'Conteudo textual ainda nao consolidado.'}</pre></div>
                 </section>
               </div>
               <div className="topic-agent-grid">

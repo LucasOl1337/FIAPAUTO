@@ -1,4 +1,3 @@
-import { buildBotFileUrl } from '../../engineweb/api/botApi.ts'
 import { formatDisplayDateOnly, type WorkspaceController } from '../../engineweb/useWorkspaceController.ts'
 
 type LearningViewProps = {
@@ -44,7 +43,7 @@ export function LearningView({ controller }: LearningViewProps) {
             </div>
             {primaryAttachment ? (
               <div className="action-row">
-                <a className="primary-button" href={buildBotFileUrl(primaryAttachment.path)} target="_blank" rel="noreferrer">
+                <a className="primary-button" href={controller.buildAssetUrl(primaryAttachment)} target="_blank" rel="noreferrer">
                   Abrir PDF
                 </a>
               </div>

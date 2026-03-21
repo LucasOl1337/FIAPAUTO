@@ -10,11 +10,13 @@ export const repoRootDir = path.resolve(backendRootDir, '..')
 
 const runtimeDir = path.join(backendRootDir, 'runtime')
 const desktopKeysDir = path.join(os.homedir(), 'Desktop', 'KEYS')
+const publicSyncDir = path.join(runtimeDir, 'public-sync')
 
 export const runtimePaths = {
   backendRootDir,
   repoRootDir,
   runtimeDir,
+  publicSyncDir,
   jobsDir: path.join(runtimeDir, 'jobs'),
   logsDir: path.join(runtimeDir, 'logs'),
   downloadsDir: path.join(runtimeDir, 'downloads'),
@@ -38,6 +40,10 @@ export const runtimePaths = {
   knowledgeCatalogDir: path.join(runtimeDir, 'knowledge', 'catalog'),
   knowledgeIndexDir: path.join(runtimeDir, 'knowledge', 'index'),
   knowledgeWarehouseFile: path.join(runtimeDir, 'knowledge', 'catalog', 'warehouse.json'),
+  publicReleasesDir: path.join(publicSyncDir, 'releases'),
+  publicCurrentDir: path.join(publicSyncDir, 'current'),
+  publicPullDir: path.join(publicSyncDir, 'pulled'),
+  publicCurrentReleaseFile: path.join(publicSyncDir, 'current-release.json'),
   sessionDir: path.join(runtimeDir, 'sessions', 'teams-profile'),
   desktopKeysDir,
   llmKeysLocalFile: path.join(desktopKeysDir, 'llmKeys.local.py'),

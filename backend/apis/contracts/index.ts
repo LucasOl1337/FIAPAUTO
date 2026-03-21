@@ -66,6 +66,10 @@ export type LlmDebugEvent = {
 export type TopicAttachment = {
   path: string
   name: string
+  key?: string
+  contentType?: string
+  size?: number
+  publicUrl?: string
 }
 
 export type TopicFaqItem = {
@@ -171,4 +175,84 @@ export type BotState = BotStatusPayload & {
   authStatus: 'authenticated' | 'login_required'
   scannedAt: string
   apiConnected: boolean
+}
+
+export type PublishedKnowledgeChunk = {
+  id: string
+  topicId: string
+  moduleKey: string
+  sourceType: 'summary' | 'overview' | 'deliverable' | 'deadline' | 'faq' | 'content'
+  text: string
+  keywords: string[]
+  entities: string[]
+  capturedAt: string
+}
+
+export type PublicManifest = {
+  schemaVersion: number
+  releaseId: string
+  publishedAt: string
+  sourceMachine: string
+  topicCount: number
+  attachmentCount: number
+  knowledgeChunkCount: number
+  contentHash: string
+}
+
+export type PublicTopicListItem = Pick<
+  SubjectTopic,
+  | 'id'
+  | 'title'
+  | 'course'
+  | 'moduleKey'
+  | 'status'
+  | 'dueText'
+  | 'summary'
+  | 'summaryGeneratedAt'
+  | 'updatedAt'
+> & {
+  attachmentCount: number
+  screenshotCount: number
+}
+
+export type PublicTopic = {
+  id: string
+  title: string
+  course: string
+  moduleKey: string
+  status: 'upcoming' | 'late' | 'completed'
+  dueText: string
+  summary: string
+  summaryGeneratedAt?: string
+  agentMemory: TopicAgentMemory | null
+  learning: TopicLearning | null
+  attachments: TopicAttachment[]
+  screenshots: string[]
+  updatedAt: string
+}
+
+export type PublicChatResponse = {
+  topicId: string
+  answer: string
+  confidence: 'high' | 'medium' | 'low'
+  strategyUsed: 'memory' | 'deterministic'
+  providerUsed: 'local'
+  citations: Array<{
+    sourceType: 'summary' | 'faq' | 'deadline' | 'deliverable' | 'content'
+    sourceLabel: string
+    snippet: string
+  }>
+  suggestedQuestions: string[]
+  nextSteps: string[]
+  answeredAt: string
+}
+
+export type PublicSyncStatus = {
+  localReleaseId?: string
+  localPublishedAt?: string
+  remoteReleaseId?: string
+  remotePublishedAt?: string
+  inSync: boolean
+  bucket?: string
+  region?: string
 }

@@ -1,6 +1,6 @@
 import http from 'node:http'
 import { topicAutomation } from '../automations/botRuntime.ts'
-import { readJsonBody, sendJson } from './http.ts'
+import { readJsonBody, requireAdminAccess, sendJson } from './http.ts'
 
 export async function handleTopicRoutes(
   request: http.IncomingMessage,
@@ -33,17 +33,26 @@ export async function handleTopicRoutes(
   }
 
   if (request.method === 'GET' && suffix === '/debug') {
+    if (!requireAdminAccess(request, response)) {
+      return true
+    }
     sendJson(response, 200, await topicAutomation.getTopicDebug(topicId))
     return true
   }
 
   if (request.method === 'POST' && suffix === '/generate-summary') {
+    if (!requireAdminAccess(request, response)) {
+      return true
+    }
     const body = await readJsonBody(request)
     sendJson(response, 200, await topicAutomation.generateTopicSummary(topicId, body.force === true))
     return true
   }
 
   if (request.method === 'POST' && suffix === '/generate-memory') {
+    if (!requireAdminAccess(request, response)) {
+      return true
+    }
     const body = await readJsonBody(request)
     sendJson(response, 200, {
       topicId,

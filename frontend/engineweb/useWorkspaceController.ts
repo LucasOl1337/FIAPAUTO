@@ -13,14 +13,17 @@ import {
   syncReadyLessonsIntoWorkspace,
   type BotState,
   type SubjectTopic,
+  buildBotFileUrl,
   type TopicAskResult,
   type TopicSummaryResult,
 } from './api/botApi.ts'
+import { askPublicTopic, buildPublicAssetUrl, fetchPublicTopic, fetchPublicTopics } from './api/publicApi.ts'
 import { initialWorkspaceState } from './state/demoData.ts'
 import { loadWorkspaceState, resetWorkspaceState, saveWorkspaceState } from './state/storage.ts'
 import type { WorkspaceState } from './types.ts'
+import type { PublicTopic, PublicTopicListItem } from '@fiapauto/backend/contracts'
 
-export function useWorkspaceController() {
+export function useWorkspaceController(appMode: 'admin' | 'user') {
   const [workspace, setWorkspace] = useState<WorkspaceState>(() => loadWorkspaceState())
   const [botState, setBotState] = useState<BotState>(emptyBotState)
   const [selectedLessonId, setSelectedLessonId] = useState(
@@ -32,11 +35,14 @@ export function useWorkspaceController() {
   const [topicAnswer, setTopicAnswer] = useState<TopicAskResult | null>(null)
   const [topicQuestion, setTopicQuestion] = useState('')
   const [topicDebugEvents, setTopicDebugEvents] = useState<BotState['llmDebug']['events']>([])
-  const [activity, setActivity] = useState('Projeto pronto para testar o bot')
+  const [activity, setActivity] = useState(
+    appMode === 'admin' ? 'Painel operacional pronto para testar o bot' : 'Site publico carregado para consulta de materias',
+  )
   const [botBusy, setBotBusy] = useState<'connect' | 'load' | 'test' | 'reset' | null>(null)
   const [topicBusy, setTopicBusy] = useState<'summary' | 'memory' | 'ask' | 'detail' | null>(null)
-  const [activeTab, setActiveTab] = useState<'aulas' | 'trabalhos' | 'aprendizado'>('aulas')
-  const [viewMode, setViewMode] = useState<'admin' | 'user'>('user')
+  const [activeTab, setActiveTab] = useState<'aulas' | 'trabalhos' | 'aprendizado'>(
+    appMode === 'admin' ? 'aulas' : 'trabalhos',
+  )
   const refreshBotStatusEvent = useEffectEvent((showMessage = false) => {
     void refreshBotStatus(showMessage)
   })
@@ -46,14 +52,19 @@ export function useWorkspaceController() {
   }, [workspace])
 
   useEffect(() => {
-    refreshBotStatusEvent(false)
-  }, [])
+    if (appMode === 'admin') {
+      refreshBotStatusEvent(false)
+      return
+    }
+
+    void loadTopics(false)
+  }, [appMode, refreshBotStatusEvent])
 
   useEffect(() => {
-    if (botState.authStatus === 'authenticated') return
+    if (appMode !== 'admin' || botState.authStatus === 'authenticated') return
     const timer = window.setInterval(() => refreshBotStatusEvent(false), 5000)
     return () => window.clearInterval(timer)
-  }, [botState.authStatus])
+  }, [appMode, botState.authStatus, refreshBotStatusEvent])
 
   useEffect(() => {
     if (!workspace.lessons.find((lesson) => lesson.id === selectedLessonId)) {
@@ -73,8 +84,9 @@ export function useWorkspaceController() {
       setTopicDebugEvents([])
       return
     }
+
     void loadTopicDetail(selectedTopicId)
-  }, [selectedTopicId])
+  }, [selectedTopicId, appMode])
 
   const importedLessons = useMemo(
     () => workspace.lessons.filter((lesson) => lesson.notes.includes('Importado automaticamente pelo bot do Teams')),
@@ -92,6 +104,31 @@ export function useWorkspaceController() {
     () => botState.topics.find((topic) => topic.id === selectedTopicId) ?? botState.topics[0] ?? null,
     [botState.topics, selectedTopicId],
   )
+
+  async function loadTopics(showMessage = true) {
+    try {
+      const topics = await fetchPublicTopics()
+
+      setBotState((current) => ({
+        ...current,
+        topics: topics.topics.map(mapPublishedTopicListToTopic),
+        apiConnected: true,
+      }))
+
+      if (!selectedTopicId && topics.topics[0]) {
+        setSelectedTopicId(topics.topics[0].id)
+      }
+
+      if (showMessage) {
+        setActivity('Materias publicas atualizadas.')
+      }
+    } catch {
+      setBotState((current) => ({ ...current, apiConnected: false }))
+      if (showMessage) {
+        setActivity('Nao foi possivel carregar as materias publicas agora.')
+      }
+    }
+  }
 
   async function refreshBotStatus(
     showMessage = true,
@@ -116,7 +153,7 @@ export function useWorkspaceController() {
       if (showMessage) setActivity('Status do bot atualizado')
     } catch {
       setBotState((current) => ({ ...current, apiConnected: false }))
-      if (showMessage) setActivity('API do bot nao respondeu. Rode npm run dev para subir tudo junto.')
+      if (showMessage) setActivity('API admin nao respondeu ou o token do painel nao e valido.')
     } finally {
       setBotBusy(null)
     }
@@ -201,9 +238,8 @@ export function useWorkspaceController() {
   async function loadTopicDetail(topicId: string) {
     setTopicBusy('detail')
     try {
-      const [topic, debug] = await Promise.all([fetchTopic(topicId), fetchTopicDebug(topicId)])
+      const topic = appMode === 'admin' ? await fetchTopic(topicId) : mapPublishedTopicToTopic(await fetchPublicTopic(topicId))
       setSelectedTopic(topic)
-      setTopicDebugEvents(debug.events)
       setTopicSummary(
         topic.summary
           ? {
@@ -216,6 +252,17 @@ export function useWorkspaceController() {
             }
           : null,
       )
+
+      if (appMode === 'admin') {
+        try {
+          const debug = await fetchTopicDebug(topicId)
+          setTopicDebugEvents(debug.events)
+        } catch {
+          setTopicDebugEvents([])
+        }
+      } else {
+        setTopicDebugEvents([])
+      }
     } catch {
       setActivity('Falha ao carregar os detalhes do topico selecionado.')
     } finally {
@@ -262,13 +309,19 @@ export function useWorkspaceController() {
     }
     setTopicBusy('ask')
     try {
-      const result = await askTopicAssistant({ topicId: selectedTopicListItem.id, question })
+      const result = appMode === 'admin'
+        ? await askTopicAssistant({ topicId: selectedTopicListItem.id, question })
+        : normalizePublicChatResult(await askPublicTopic({ topicId: selectedTopicListItem.id, question }), selectedTopicListItem.moduleKey)
       setTopicAnswer(result)
       await loadTopicDetail(selectedTopicListItem.id)
-      await refreshBotStatus(false, {
-        preserveTopicSummary: true,
-        preserveTopicAnswer: true,
-      })
+      if (appMode === 'admin') {
+        await refreshBotStatus(false, {
+          preserveTopicSummary: true,
+          preserveTopicAnswer: true,
+        })
+      } else {
+        await loadTopics(false)
+      }
       if (result.strategyUsed === 'memory') {
         setActivity('Resposta entregue pela memoria persistida do topico.')
       } else if (result.strategyUsed === 'deterministic') {
@@ -305,8 +358,7 @@ export function useWorkspaceController() {
     topicBusy,
     activeTab,
     setActiveTab,
-    viewMode,
-    setViewMode,
+    viewMode: appMode,
     importedLessons,
     selectedLesson,
     selectedTranscript,
@@ -317,6 +369,11 @@ export function useWorkspaceController() {
     handleGenerateSummary,
     handleGenerateMemory,
     handleAskTopic,
+    loadTopics,
+    buildAssetUrl: (asset: string | { path?: string; key?: string; publicUrl?: string }) => {
+      const rawValue = typeof asset === 'string' ? asset : asset.publicUrl || asset.key || asset.path || ''
+      return appMode === 'admin' ? buildBotFileUrl(rawValue) : buildPublicAssetUrl(rawValue)
+    },
   }
 }
 
@@ -488,7 +545,7 @@ function normalizeSummarySectionText(label: string, value: string) {
   }
 
   return cleanTopicDisplayText(value)
-    .replace(/^Prazo de entrega às?\s*/i, '')
+    .replace(/^Prazo de entrega Ã s?\s*/i, '')
     .replace(/^Prazo de entrega\s*/i, '')
     .replace(/^Titulo:\s*/i, '')
     .trim()
@@ -512,7 +569,7 @@ function normalizeDeliverableText(value: string) {
     return 'Apresentacao em PDF'
   }
 
-  if (/(formular|formulário|formulario|pesquisa)/i.test(cleaned) && /pdf/i.test(cleaned)) {
+  if (/(formular|formulÃ¡rio|formulario|pesquisa)/i.test(cleaned) && /pdf/i.test(cleaned)) {
     return 'Formulario ou pesquisa em PDF'
   }
 
@@ -588,7 +645,7 @@ function buildDeliverablesFromHeuristics(value: string) {
     items.push('Apresentacao em PDF')
   }
 
-  if (/(formular|formulário|formulario|pesquisa)/i.test(normalized) && /pdf/i.test(normalized)) {
+  if (/(formular|formulÃ¡rio|formulario|pesquisa)/i.test(normalized) && /pdf/i.test(normalized)) {
     items.push('Formulario ou pesquisa em PDF')
   }
 
@@ -597,4 +654,76 @@ function buildDeliverablesFromHeuristics(value: string) {
   }
 
   return dedupeDisplayItems(items)
+}
+
+function mapPublishedTopicListToTopic(topic: PublicTopicListItem): SubjectTopic {
+  return {
+    id: topic.id,
+    title: topic.title,
+    course: topic.course,
+    moduleKey: topic.moduleKey,
+    status: topic.status,
+    dueText: topic.dueText,
+    detailUrl: undefined,
+    assignmentIds: [],
+    attachments: [],
+    screenshots: [],
+    contentText: '',
+    summary: topic.summary,
+    summaryGeneratedAt: topic.summaryGeneratedAt,
+    agentMemory: null,
+    agentMemoryGeneratedAt: undefined,
+    learning: null,
+    learningGeneratedAt: undefined,
+    updatedAt: topic.updatedAt,
+    warnings: [],
+  }
+}
+
+function mapPublishedTopicToTopic(topic: PublicTopic): SubjectTopic {
+  return {
+    id: topic.id,
+    title: topic.title,
+    course: topic.course,
+    moduleKey: topic.moduleKey,
+    status: topic.status,
+    dueText: topic.dueText,
+    detailUrl: undefined,
+    assignmentIds: [],
+    attachments: topic.attachments.map((attachment) => ({
+      ...attachment,
+      path: attachment.key || attachment.path,
+    })),
+    screenshots: topic.screenshots,
+    contentText: '',
+    summary: topic.summary,
+    summaryGeneratedAt: topic.summaryGeneratedAt,
+    agentMemory: topic.agentMemory,
+    agentMemoryGeneratedAt: undefined,
+    learning: topic.learning,
+    learningGeneratedAt: undefined,
+    updatedAt: topic.updatedAt,
+    warnings: [],
+  }
+}
+
+function normalizePublicChatResult(
+  payload: Awaited<ReturnType<typeof askPublicTopic>>,
+  moduleKey: string,
+): TopicAskResult {
+  return {
+    topicId: payload.topicId,
+    answer: payload.answer,
+    moduleKey,
+    warnings: [],
+    usedFallback: false,
+    answeredAt: payload.answeredAt,
+    confidence: payload.confidence,
+    strategyUsed: payload.strategyUsed === 'memory' ? 'memory' : 'deterministic',
+    providerUsed: 'local',
+    fallbackLevel: 0,
+    citations: payload.citations,
+    suggestedQuestions: payload.suggestedQuestions,
+    nextSteps: payload.nextSteps,
+  }
 }

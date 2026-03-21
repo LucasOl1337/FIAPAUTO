@@ -12,7 +12,7 @@ import {
   topicAutomation,
   writeWorkspaceReportFromScan,
 } from '../automations/botRuntime.ts'
-import { sendJson } from './http.ts'
+import { isAdminProtectionEnabled, requireAdminAccess, sendJson } from './http.ts'
 
 type ScanState = {
   value: boolean
@@ -25,16 +25,22 @@ export async function handleBotRoutes(
   scanState: ScanState,
 ) {
   if (request.method === 'GET' && requestUrl.pathname === '/api/health') {
-    sendJson(response, 200, { ok: true })
+    sendJson(response, 200, { ok: true, adminProtectionEnabled: isAdminProtectionEnabled() })
     return true
   }
 
   if (request.method === 'GET' && requestUrl.pathname === '/api/bot/status') {
+    if (!requireAdminAccess(request, response)) {
+      return true
+    }
     sendJson(response, 200, await getBotStatus())
     return true
   }
 
   if (request.method === 'POST' && requestUrl.pathname === '/api/bot/session') {
+    if (!requireAdminAccess(request, response)) {
+      return true
+    }
     try {
       const scan = await createTeamsAdapter().openSessionWindow()
       await writeWorkspaceReportFromScan(scan)
@@ -49,6 +55,9 @@ export async function handleBotRoutes(
   }
 
   if (request.method === 'POST' && requestUrl.pathname === '/api/bot/test') {
+    if (!requireAdminAccess(request, response)) {
+      return true
+    }
     if (scanState.value) {
       sendJson(response, 409, { error: 'scan_in_progress', ...(await getBotStatus()) })
       return true
@@ -92,6 +101,9 @@ export async function handleBotRoutes(
   }
 
   if (request.method === 'POST' && requestUrl.pathname === '/api/bot/reset') {
+    if (!requireAdminAccess(request, response)) {
+      return true
+    }
     await resetBotRuntimeState()
     sendJson(response, 200, await getBotStatus())
     return true

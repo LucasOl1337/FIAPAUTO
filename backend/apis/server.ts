@@ -4,12 +4,16 @@ import { corsHeaders, sendJson } from './http.ts'
 import { handleAssistantRoutes } from './assistantRoutes.ts'
 import { handleBotRoutes } from './botRoutes.ts'
 import { handleFilesRoutes } from './filesRoutes.ts'
+import { handlePublicRoutes } from './publicRoutes.ts'
 import { handleTopicRoutes } from './topicRoutes.ts'
 import { getBotLogger } from '../automations/botRuntime.ts'
+import { loadBackendEnv } from '../config/loadEnv.ts'
 import { runtimePaths } from '../config/runtimePaths.ts'
 import { readJsonFile, writeJsonFile } from '../database/fs.ts'
 
-const HOST = '127.0.0.1'
+loadBackendEnv()
+
+const HOST = process.env.FIAPAUTO_API_HOST || '127.0.0.1'
 const DEFAULT_PORT = 43872
 const scanState = { value: false }
 
@@ -72,6 +76,10 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (await handleFilesRoutes(request, response, requestUrl)) {
+      return
+    }
+
+    if (await handlePublicRoutes(request, response, requestUrl)) {
       return
     }
 

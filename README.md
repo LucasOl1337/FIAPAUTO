@@ -62,20 +62,26 @@ npm run bot:worker
 ```
 
 ## Screenshots
-### Home / identidade
-![Hero](docs/assets/hero.png)
+### Tela principal do aluno em `Trabalhos`
+![Trabalhos Dashboard](docs/assets/user-trabalhos-dashboard.png)
 
-### Captura do Teams
-![Teams Workspace](docs/assets/teams-workspace.png)
+### Tela do aluno em `Aulas`
+![Aulas Dashboard](docs/assets/user-aulas-dashboard.png)
 
-### Lista de atividade extraida
+### Visao geral da lista de atividades
 ![Checkpoint List](docs/assets/checkpoint-1-list.png)
 
-### Detalhe de atividade e assistente
+### Detalhe de atividade com resumo, entregaveis e chat
 ![Checkpoint Detail](docs/assets/checkpoint-1-detail.png)
 
-### Outro exemplo de materia
+### Outro exemplo de materia no fluxo do aluno
 ![Cloud Security Detail](docs/assets/cloud-security-detail.png)
+
+### Identidade visual do projeto
+![Hero](docs/assets/hero.png)
+
+### Captura tecnica do workspace do bot
+![Teams Workspace](docs/assets/teams-workspace.png)
 
 ## Fluxo Atual
 1. O bot captura trabalhos e anexos do Teams.

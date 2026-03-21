@@ -47,20 +47,26 @@ Gerada automaticamente para cada atividade extraida, com:
 - documentacao visual com imagens no repositorio
 
 ## Screenshots desta versao
-### Hero
-![Hero](docs/assets/hero.png)
+### Dashboard do aluno em `Trabalhos`
+![Trabalhos Dashboard](docs/assets/user-trabalhos-dashboard.png)
 
-### Workspace do Teams
-![Teams Workspace](docs/assets/teams-workspace.png)
+### Dashboard do aluno em `Aulas`
+![Aulas Dashboard](docs/assets/user-aulas-dashboard.png)
 
-### Lista de topicos
+### Lista de topicos extraidos
 ![Checkpoint List](docs/assets/checkpoint-1-list.png)
 
-### Tela de detalhe do trabalho
+### Tela de detalhe do trabalho com assistente
 ![Checkpoint Detail](docs/assets/checkpoint-1-detail.png)
 
-### Exemplo adicional
+### Outro exemplo de atividade no layout do aluno
 ![Cloud Security Detail](docs/assets/cloud-security-detail.png)
+
+### Identidade visual do projeto
+![Hero](docs/assets/hero.png)
+
+### Captura tecnica do workspace do bot
+![Teams Workspace](docs/assets/teams-workspace.png)
 
 ## Limites ainda conhecidos
 - extracao de entregaveis ainda pode melhorar em alguns tipos de PDF

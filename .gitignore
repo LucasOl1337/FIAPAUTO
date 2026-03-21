@@ -3,6 +3,7 @@ node_modules
 dist
 dist-ssr
 frontend/dist
+aws/dist
 backend/runtime
 bot/session
 
