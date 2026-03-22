@@ -20,19 +20,11 @@ export function WorksView({ controller }: WorksViewProps) {
     'O que pode me fazer perder pontos?',
   ]
   const topicAnswer = controller.topicAnswer
+  const answerSections = topicAnswer?.sections
   const answerNextSteps = topicAnswer?.nextSteps ?? []
   const answerCitations = topicAnswer?.citations ?? []
-  const answerSuggestions = topicAnswer?.suggestedQuestions ?? []
-  const answerConfidenceLabel =
-    topicAnswer?.confidence === 'high'
-      ? 'Alta confianca'
-      : topicAnswer?.confidence === 'low'
-        ? 'Baixa confianca'
-        : 'Confianca media'
-  const answerSourceLabel =
-    topicAnswer?.providerUsed && topicAnswer.providerUsed !== 'local'
-      ? 'Resposta gerada com IA em nuvem'
-      : 'Resposta guiada pelo material salvo'
+  const answerSuggestions = answerSections?.followUpQuestions ?? topicAnswer?.suggestedQuestions ?? []
+  const answerSourceLabel = answerSections?.answerMode === 'general_guidance' ? 'Explicacao complementar' : 'Baseada na materia'
   const allSummarySections = extractSummarySections(controller.topicSummary?.summary || controller.selectedTopic?.summary)
   const summarySections = allSummarySections.filter((item) => !/^(prazo|entregaveis?)$/i.test(item.label))
   const userDeliverables = buildUserDeliverables({
@@ -48,19 +40,13 @@ export function WorksView({ controller }: WorksViewProps) {
     controller.selectedTopic?.agentMemory?.keyFacts ?? [],
     controller.selectedTopic?.summary ?? '',
   )
-  const fullAnswerItems = buildFullAnswerItems(parsedAnswer)
-  const deliverableItems = compactAnswerItems(parsedAnswer.deliverables.length > 0 ? parsedAnswer.deliverables : userDeliverables, 2, 72)
-  const nextActionItems = compactAnswerItems(parsedAnswer.nextSteps.length > 0 ? parsedAnswer.nextSteps : answerNextSteps, 2, 76)
+  const fullAnswerItems = compactAnswerItems(answerSections?.fullAnswer ?? buildFullAnswerItems(parsedAnswer), 4, 220)
+  const deliverableItems = compactAnswerItems(answerSections?.deliverables ?? (parsedAnswer.deliverables.length > 0 ? parsedAnswer.deliverables : userDeliverables), 3, 72)
+  const nextActionItems = compactAnswerItems(answerSections?.nextSteps ?? (parsedAnswer.nextSteps.length > 0 ? parsedAnswer.nextSteps : answerNextSteps), 3, 76)
   const suggestionItems = compactAnswerItems(answerSuggestions, 3, 58)
   const sourcePreviewItems = compactAnswerItems(answerCitations.map((citation) => `${citation.sourceLabel}: ${sanitizeAssistantText(citation.snippet)}`), 2, 150)
-  const compactDirect = truncateText(parsedAnswer.direct, 160)
-  const compactAttention = compactAnswerItems(expandAnswerBullets(attentionItems), 3, 96)
-  const qualityLabel =
-    topicAnswer?.qualityStatus === 'regenerated'
-      ? 'Resposta reforcada automaticamente'
-      : topicAnswer?.qualityStatus === 'fallback'
-        ? 'Fallback local'
-        : 'Resposta validada pela IA'
+  const compactDirect = truncateText(answerSections?.summary10s ?? parsedAnswer.direct, 160)
+  const compactAttention = compactAnswerItems(answerSections?.attentionPoints ?? expandAnswerBullets(attentionItems), 4, 96)
 
   return (
     <section className="panel-card works-shell">
@@ -150,9 +136,7 @@ export function WorksView({ controller }: WorksViewProps) {
                         <strong>{compactDirect}</strong>
                       </div>
                       <div className="assistant-answer-badges">
-                        <span className="info-chip">{qualityLabel}</span>
                         <span className="info-chip">{answerSourceLabel}</span>
-                        <span className="info-chip">{answerConfidenceLabel}</span>
                       </div>
                     </div>
                     <div className="meta-card clean-card assistant-full-answer-card">
@@ -216,8 +200,7 @@ export function WorksView({ controller }: WorksViewProps) {
                       <span>Como o sistema respondeu</span>
                       <div className="user-list">
                         <p>{answerSourceLabel}</p>
-                        <p>{answerConfidenceLabel}</p>
-                        {topicAnswer.providerUsed === 'local' ? <p>O sistema respondeu com base no material salvo desta materia.</p> : <p>O sistema usou um modelo em nuvem para deixar a resposta mais natural.</p>}
+                        {answerSections?.answerMode === 'general_guidance' ? <p>O sistema conectou sua duvida com a materia e complementou a explicacao.</p> : <p>O sistema respondeu com base no material salvo desta materia.</p>}
                       </div>
                     </div>
                     <div className="meta-card clean-card">

@@ -352,12 +352,8 @@ export function useWorkspaceController(appMode: 'admin' | 'user') {
           preserveTopicAnswer: true,
         })
       }
-      if (result.qualityStatus === 'accepted') {
-        setActivity('Resposta validada pela IA.')
-      } else if (result.qualityStatus === 'regenerated') {
-        setActivity('Resposta reforcada por segunda passada.')
-      } else if (result.qualityStatus === 'fallback') {
-        setActivity('Resposta entregue pelo fallback local.')
+      if (result.qualityStatus === 'accepted' || result.qualityStatus === 'regenerated' || result.qualityStatus === 'fallback') {
+        setActivity(result.sections?.answerMode === 'general_guidance' ? 'Explicacao complementar pronta.' : 'Resposta baseada na materia pronta.')
       } else if (result.strategyUsed === 'memory') {
         setActivity('Resposta entregue pela memoria persistida do topico.')
       } else if (result.strategyUsed === 'deterministic') {
@@ -753,6 +749,7 @@ function normalizePublicChatResult(
   return {
     topicId: payload.topicId,
     answer: payload.answer,
+    sections: payload.sections,
     moduleKey,
     warnings: [],
     usedFallback: payload.providerUsed === 'local',

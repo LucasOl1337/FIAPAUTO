@@ -1,6 +1,12 @@
 import type { PublicChatResponse, PublicTopic, PublishedKnowledgeChunk } from '@fiapauto/backend/contracts'
 
 type Citation = PublicChatResponse['citations'][number]
+type ParsedStructuredAnswer = {
+  direct: string
+  deliverables: string[]
+  attention: string[]
+  nextSteps: string[]
+}
 type QuestionIntent =
   | 'deadline'
   | 'deliverable'
@@ -18,7 +24,7 @@ export function answerPublishedTopicQuestion(input: {
   topic: PublicTopic
   chunks: PublishedKnowledgeChunk[]
   question: string
-}) {
+}): PublicChatResponse {
   const intent = classifyQuestionIntent(input.question)
   const scopedChunks = input.chunks.filter((chunk) => chunk.topicId === input.topic.id)
   const citations = rankChunks(scopedChunks, input.question).slice(0, 3).map((chunk) => ({
@@ -37,6 +43,12 @@ export function answerPublishedTopicQuestion(input: {
   return {
     topicId: input.topic.id,
     answer,
+    sections: buildSections({
+      topic: input.topic,
+      answer,
+      suggestedQuestions: buildSuggestedQuestions(intent),
+      nextSteps: buildNextSteps(input.topic, input.question, intent),
+    }),
     confidence: citations.length >= 2 ? 'high' : citations.length === 1 ? 'medium' : 'low',
     strategyUsed: input.topic.agentMemory ? 'memory' : 'deterministic',
     providerUsed: 'local',
@@ -48,6 +60,94 @@ export function answerPublishedTopicQuestion(input: {
     qualityReason: 'Resposta entregue pelo fallback local estruturado.',
     answeredByPass: 'local',
   } satisfies PublicChatResponse
+}
+
+function buildSections(input: {
+  topic: PublicTopic
+  answer: string
+  suggestedQuestions: string[]
+  nextSteps: string[]
+}): PublicChatResponse['sections'] {
+  const parsed = parseStructuredAnswer(input.answer)
+  const fullAnswer = dedupeItems([
+    parsed.direct,
+    ...parsed.attention,
+    ...parsed.nextSteps,
+  ]).slice(0, 4)
+
+  return {
+    summary10s: parsed.direct || `Resumo rapido de ${input.topic.title}.`,
+    fullAnswer: fullAnswer.length > 0 ? fullAnswer : [`Entenda o objetivo central de ${input.topic.title} e execute a proxima acao pratica.`],
+    deliverables: parsed.deliverables.filter((item: string) => !/\bprazo\b/i.test(item)).slice(0, 3),
+    attentionPoints: parsed.attention.slice(0, 3),
+    nextSteps: input.nextSteps.slice(0, 3),
+    followUpQuestions: input.suggestedQuestions.filter((item) => !/\bprazo\b/i.test(item)).slice(0, 3),
+    answerMode: /\b(python|codigo|script|excel|r)\b/i.test(input.answer) && !parsed.deliverables.length ? 'mixed' : 'grounded',
+  }
+}
+
+function parseStructuredAnswer(answer: string): ParsedStructuredAnswer {
+  const parsed: ParsedStructuredAnswer = {
+    direct: '',
+    deliverables: [],
+    attention: [],
+    nextSteps: [],
+  }
+  let currentSection: keyof ParsedStructuredAnswer | null = null
+
+  for (const line of answer.split(/\n+/).map((item) => item.trim()).filter(Boolean)) {
+    const match = line.match(/^([A-Za-z\s]+):\s*(.*)$/)
+    if (match) {
+      const section = normalizeSection(match[1] ?? '')
+      if (section) {
+        currentSection = section
+        const inlineValue = (match[2] ?? '').trim()
+        if (inlineValue) {
+          pushParsedValue(parsed, section, inlineValue)
+        }
+        continue
+      }
+    }
+
+    const bullet = line.match(/^[-*]\s+(.+)$/)
+    if (bullet && currentSection) {
+      pushParsedValue(parsed, currentSection, bullet[1] ?? '')
+      continue
+    }
+
+    if (currentSection) {
+      pushParsedValue(parsed, currentSection, line)
+    }
+  }
+
+  if (!parsed.direct) {
+    parsed.direct = answer.replace(/\s+/g, ' ').trim()
+  }
+
+  return parsed
+}
+
+function normalizeSection(value: string): keyof ParsedStructuredAnswer | null {
+  const normalized = normalize(value)
+  if (/^resposta direta|^resumo/.test(normalized)) return 'direct'
+  if (/^o que entregar|^entrega|^entreg/.test(normalized)) return 'deliverables'
+  if (/^atencao|^risco/.test(normalized)) return 'attention'
+  if (/^proximo passo|^proximos passos|^checklist|^como fazer/.test(normalized)) return 'nextSteps'
+  return null
+}
+
+function pushParsedValue(parsed: ParsedStructuredAnswer, section: keyof ParsedStructuredAnswer, value: string) {
+  const cleaned = value.replace(/\s+/g, ' ').trim()
+  if (!cleaned) {
+    return
+  }
+  if (section === 'direct') {
+    parsed.direct = parsed.direct ? `${parsed.direct} ${cleaned}`.trim() : cleaned
+    return
+  }
+  if (!parsed[section].includes(cleaned)) {
+    parsed[section].push(cleaned)
+  }
 }
 
 function classifyQuestionIntent(question: string): QuestionIntent {

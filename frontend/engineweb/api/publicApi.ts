@@ -9,16 +9,16 @@ import type {
 import { askOllamaCloudTopic } from './ollamaCloud.ts'
 import { answerPublishedTopicQuestion } from './publicAssistant.ts'
 
-const PUBLIC_API_TUNNEL = 'https://ricky-expo-doors-documents.trycloudflare.com'
 const PUBLIC_API_BASE = resolvePublicApiBase()
 const STATIC_PUBLIC_BASE = '/published'
 
 export type PublicTopicChatResult = {
   topicId: string
   answer: string
+  sections: PublicChatResponse['sections']
   confidence: 'high' | 'medium' | 'low'
-  strategyUsed: 'rag_llm' | 'memory' | 'deterministic'
-  providerUsed: 'ollama' | 'local'
+  strategyUsed: PublicChatResponse['strategyUsed']
+  providerUsed: PublicChatResponse['providerUsed']
   citations: PublicChatResponse['citations']
   suggestedQuestions: string[]
   nextSteps: string[]
@@ -57,12 +57,24 @@ export async function fetchPublicManifest() {
 }
 
 export async function fetchPublicTopics() {
-  return fetchWithStaticFallback<{ topics: PublicTopicListItem[] }, PublicTopicListItem[]>({
-    apiPath: '/api/public/topics',
-    staticPath: '/topics.json',
-    errorCode: 'public_topics_failed',
-    transformStatic: (topics) => ({ topics }),
-  })
+  if (PUBLIC_API_BASE) {
+    try {
+      const response = await fetchPublicApiWithRetry('/api/public/topics', {
+        headers: await buildPublicHeaders(),
+      })
+      if (response.ok) {
+        const payload = (await response.json()) as { topics?: PublicTopicListItem[] }
+        if (Array.isArray(payload.topics) && payload.topics.length > 0) {
+          return { topics: payload.topics }
+        }
+      }
+    } catch {
+      // Fall back to static files when the public API is unavailable or empty.
+    }
+  }
+
+  const topics = await fetchStaticJson<PublicTopicListItem[]>('/topics.json', 'public_topics_failed')
+  return { topics }
 }
 
 export async function fetchPublicTopic(topicId: string) {
@@ -217,7 +229,7 @@ function resolvePublicApiBase() {
     .filter(Boolean)
 
   const explicitBase = explicitCandidates.find((value) => !shouldIgnoreExplicitApiBase(value))
-  return (explicitBase || PUBLIC_API_TUNNEL).replace(/\/+$/, '')
+  return explicitBase ? explicitBase.replace(/\/+$/, '') : ''
 }
 
 function shouldIgnoreExplicitApiBase(value: string) {

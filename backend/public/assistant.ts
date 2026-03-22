@@ -171,21 +171,30 @@ function buildProviderPayload(input: {
   })
 
   if (!evaluation.accepted) {
+    const nextSteps = buildActionableSteps({
+      topic: input.input.topic,
+      question: input.input.question,
+      intent: input.intent,
+      citations: input.citations,
+    })
     return {
       topicId: input.input.topic.id,
       answer: input.answer,
+      sections: buildResponseSections({
+        summary10s: parsed.direct,
+        fullAnswer: [sanitizeAnswerText(input.answer)],
+        deliverables: parsed.deliverables,
+        attentionPoints: parsed.attention,
+        nextSteps,
+        followUpQuestions: buildSuggestedQuestions(input.intent),
+      }),
       confidence: input.confidence,
       strategyUsed: input.providerResponse.strategyUsed,
       providerUsed: input.providerResponse.providerUsed,
       fallbackLevel: input.providerResponse.fallbackLevel,
       citations: input.citations,
       suggestedQuestions: buildSuggestedQuestions(input.intent),
-      nextSteps: buildActionableSteps({
-        topic: input.input.topic,
-        question: input.input.question,
-        intent: input.intent,
-        citations: input.citations,
-      }),
+      nextSteps,
       answeredAt: new Date().toISOString(),
       qualityStatus: 'fallback',
       qualityReason: evaluation.reason,
@@ -194,13 +203,30 @@ function buildProviderPayload(input: {
     } satisfies PublicChatResponse
   }
 
+  const nextSteps = parsed.nextSteps.length > 0
+    ? parsed.nextSteps.slice(0, 3)
+    : buildActionableSteps({
+      topic: input.input.topic,
+      question: input.input.question,
+      intent: input.intent,
+      citations: input.citations,
+    })
+  const formattedAnswer = formatStructuredAnswer({
+    direct: parsed.direct,
+    deliverables: parsed.deliverables,
+    attention: parsed.attention,
+    nextSteps: parsed.nextSteps,
+  })
   return {
     topicId: input.input.topic.id,
-    answer: formatStructuredAnswer({
-      direct: parsed.direct,
+    answer: formattedAnswer,
+    sections: buildResponseSections({
+      summary10s: parsed.direct,
+      fullAnswer: [sanitizeAnswerText(parsed.direct)],
       deliverables: parsed.deliverables,
-      attention: parsed.attention,
-      nextSteps: parsed.nextSteps,
+      attentionPoints: parsed.attention,
+      nextSteps,
+      followUpQuestions: buildSuggestedQuestions(input.intent),
     }),
     confidence: input.confidence,
     strategyUsed: input.providerResponse.strategyUsed,
@@ -208,14 +234,7 @@ function buildProviderPayload(input: {
     fallbackLevel: input.providerResponse.fallbackLevel,
     citations: input.citations,
     suggestedQuestions: buildSuggestedQuestions(input.intent),
-    nextSteps: parsed.nextSteps.length > 0
-      ? parsed.nextSteps.slice(0, 3)
-      : buildActionableSteps({
-        topic: input.input.topic,
-        question: input.input.question,
-        intent: input.intent,
-        citations: input.citations,
-      }),
+    nextSteps,
     answeredAt: new Date().toISOString(),
     qualityStatus: input.qualityStatus,
     qualityReason: evaluation.reason,
@@ -235,6 +254,14 @@ function buildFallbackPayload(input: {
   return {
     topicId: input.input.topic.id,
     answer: input.deterministic.answer,
+    sections: buildResponseSections({
+      summary10s: extractSectionSummary(input.deterministic.answer),
+      fullAnswer: [sanitizeAnswerText(input.deterministic.answer)],
+      deliverables: input.deterministic.deliverables,
+      attentionPoints: input.deterministic.attention,
+      nextSteps: input.deterministic.nextSteps,
+      followUpQuestions: buildSuggestedQuestions(classifyQuestionIntent(input.input.question)),
+    }),
     confidence: input.confidence,
     strategyUsed: input.input.topic.agentMemory ? 'memory' : 'deterministic',
     providerUsed: 'local',
@@ -248,6 +275,38 @@ function buildFallbackPayload(input: {
     answeredByPass: 'local',
     missingSections: input.missingSections,
   } satisfies PublicChatResponse
+}
+
+function buildResponseSections(input: {
+  summary10s: string
+  fullAnswer: string[]
+  deliverables: string[]
+  attentionPoints: string[]
+  nextSteps: string[]
+  followUpQuestions: string[]
+}): PublicChatResponse['sections'] {
+  const deliverables = dedupeItems(input.deliverables).slice(0, 3)
+  const attentionPoints = dedupeItems(input.attentionPoints).slice(0, 3)
+  const nextSteps = dedupeItems(input.nextSteps).slice(0, 3)
+  return {
+    summary10s: sanitizeAnswerText(input.summary10s) || 'Nao encontrei isso no material',
+    fullAnswer: dedupeItems(input.fullAnswer).slice(0, 3),
+    deliverables,
+    attentionPoints,
+    nextSteps,
+    followUpQuestions: dedupeItems(input.followUpQuestions).slice(0, 3),
+    answerMode:
+      deliverables.length > 0 && nextSteps.length > 0
+        ? 'grounded'
+        : nextSteps.length > 0 || attentionPoints.length > 0
+          ? 'mixed'
+          : 'general_guidance',
+  }
+}
+
+function extractSectionSummary(answer: string) {
+  const parsed = parseStructuredAnswer(answer)
+  return parsed.direct || sanitizeAnswerText(answer)
 }
 
 function buildDeterministicPackage(input: {

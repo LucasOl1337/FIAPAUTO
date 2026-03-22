@@ -33,8 +33,11 @@ function PublicApp(props: { userLabel: string }) {
     <main className="simple-app">
       <section className="hero-card">
         <div className="hero-topbar">
-          <div>
-            <p className="eyebrow">FIAPAUTO</p>
+          <div className="brand-block">
+            <div className="brand-line">
+              <BrandMark />
+              <p className="eyebrow">FIAPAUTO</p>
+            </div>
             <h1>Assistente de Materias</h1>
             <p className="hero-text">Experiencia publica focada em entender entregaveis, contexto da materia e proximos passos.</p>
           </div>
@@ -86,6 +89,27 @@ function AdminApp() {
         </div>
       </section>
     </main>
+  )
+}
+
+function BrandMark() {
+  return (
+    <span className="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 64 64" role="img">
+        <defs>
+          <linearGradient id="brand-red" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#ff6969" />
+            <stop offset="35%" stopColor="#ff3d4f" />
+            <stop offset="100%" stopColor="#c6002b" />
+          </linearGradient>
+        </defs>
+        <rect width="64" height="64" rx="18" fill="#111" />
+        <g fill="url(#brand-red)">
+          <path d="M12 16c0-3.3 2.7-6 6-6h16c0 5.5-4.5 10-10 10H18v6h12l-6 8H18v16h-6z" />
+          <path d="M36 16c0-3.3 2.7-6 6-6h16c0 5.5-4.5 10-10 10H42v6h12l-6 8H42v16h-6z" />
+        </g>
+      </svg>
+    </span>
   )
 }
 

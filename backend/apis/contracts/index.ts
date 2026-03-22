@@ -142,6 +142,15 @@ export type TopicSummaryResult = {
 export type TopicAskResult = {
   topicId: string
   answer: string
+  sections?: {
+    summary10s: string
+    fullAnswer: string[]
+    deliverables: string[]
+    attentionPoints: string[]
+    nextSteps: string[]
+    followUpQuestions: string[]
+    answerMode: 'grounded' | 'general_guidance' | 'mixed'
+  }
   moduleKey: string
   warnings: string[]
   usedFallback: boolean
@@ -302,6 +311,15 @@ export type PublicTopic = {
 export type PublicChatResponse = {
   topicId: string
   answer: string
+  sections: {
+    summary10s: string
+    fullAnswer: string[]
+    deliverables: string[]
+    attentionPoints: string[]
+    nextSteps: string[]
+    followUpQuestions: string[]
+    answerMode: 'grounded' | 'general_guidance' | 'mixed'
+  }
   confidence: 'high' | 'medium' | 'low'
   strategyUsed: 'memory' | 'rag_llm' | 'provider_fallback' | 'deterministic'
   providerUsed: 'ollama' | 'gemini' | 'local'

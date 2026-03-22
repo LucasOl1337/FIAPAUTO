@@ -8,6 +8,7 @@ const OLLAMA_MAX_IMAGES = Number(import.meta.env.VITE_OLLAMA_MAX_IMAGES ?? '2') 
 type PublicCloudChatResponse = {
   topicId: string
   answer: string
+  sections: PublicChatResponse['sections']
   confidence: 'high' | 'medium' | 'low'
   strategyUsed: 'rag_llm' | 'memory' | 'deterministic'
   providerUsed: 'ollama' | 'local'
@@ -117,6 +118,7 @@ export async function askOllamaCloudTopic(input: {
       return {
         topicId: input.topic.id,
         answer: normalizeStructuredAnswer(retryAnswer),
+        sections: buildSections(input.topic, retryAnswer),
         confidence: citations.length >= 2 ? 'high' : citations.length === 1 ? 'medium' : 'low',
         strategyUsed: 'rag_llm',
         providerUsed: 'ollama',
@@ -138,6 +140,7 @@ export async function askOllamaCloudTopic(input: {
   return {
     topicId: input.topic.id,
     answer: normalizeStructuredAnswer(answer),
+    sections: buildSections(input.topic, answer),
     confidence: citations.length >= 2 ? 'high' : citations.length === 1 ? 'medium' : 'low',
     strategyUsed: 'rag_llm',
     providerUsed: 'ollama',
@@ -150,7 +153,30 @@ export async function askOllamaCloudTopic(input: {
     qualityReason: primaryEvaluation.reason,
     answeredByPass: 'primary',
     missingSections: primaryEvaluation.missingSections,
-  } satisfies PublicCloudChatResponse
+} satisfies PublicCloudChatResponse
+}
+
+function buildSections(topic: PublicTopic, answer: string): PublicChatResponse['sections'] {
+  const parsed = parseStructuredAnswer(answer)
+  const fullAnswer = [
+    parsed.direct,
+    ...parsed.attention,
+    ...parsed.nextSteps,
+  ]
+    .map((item) => sanitizeAnswerText(item))
+    .filter(Boolean)
+    .filter((item, index, array) => array.findIndex((candidate) => candidate.toLowerCase() === item.toLowerCase()) === index)
+    .slice(0, 4)
+
+  return {
+    summary10s: parsed.direct || `Resumo rapido de ${topic.title}.`,
+    fullAnswer: fullAnswer.length > 0 ? fullAnswer : [`Veja os proximos passos de ${topic.title} e execute a primeira acao pratica.`],
+    deliverables: parsed.deliverables.filter((item) => !/\bprazo\b/i.test(item)).slice(0, 3),
+    attentionPoints: parsed.attention.slice(0, 3),
+    nextSteps: parsed.nextSteps.slice(0, 3),
+    followUpQuestions: buildSuggestedQuestions(topic).filter((item) => !/\bprazo\b/i.test(item)).slice(0, 3),
+    answerMode: 'grounded',
+  }
 }
 
 async function requestOllamaChat(input: { prompt: string; encodedImages: string[] }) {
