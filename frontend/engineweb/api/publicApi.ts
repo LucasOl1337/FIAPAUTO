@@ -76,7 +76,7 @@ export async function fetchPublicTopic(topicId: string) {
 export async function askPublicTopic(input: { topicId: string; question: string }) {
   if (PUBLIC_API_BASE) {
     try {
-      const response = await fetch(buildPublicApiUrl('/api/public/chat/topic'), {
+      const response = await fetchPublicApiWithRetry('/api/public/chat/topic', {
         method: 'POST',
         headers: await buildPublicHeaders(),
         body: JSON.stringify(input),
@@ -151,7 +151,7 @@ async function fetchWithStaticFallback<T, TStatic = T>(input: {
 }) {
   if (PUBLIC_API_BASE) {
     try {
-      const response = await fetch(buildPublicApiUrl(input.apiPath), {
+      const response = await fetchPublicApiWithRetry(input.apiPath, {
         headers: await buildPublicHeaders(),
       })
       if (response.ok) {
@@ -176,6 +176,36 @@ async function fetchStaticJson<T>(path: string, errorCode: string) {
   }
 
   return (await response.json()) as T
+}
+
+async function fetchPublicApiWithRetry(path: string, init: RequestInit, attempts = 3) {
+  let lastError: unknown
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const response = await fetch(buildPublicApiUrl(path), init)
+      if (!isTransientPublicApiStatus(response.status) || attempt === attempts - 1) {
+        return response
+      }
+    } catch (error) {
+      lastError = error
+      if (attempt === attempts - 1) {
+        throw error
+      }
+    }
+
+    await delay(350 * (attempt + 1))
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('public_api_request_failed')
+}
+
+function isTransientPublicApiStatus(status: number) {
+  return status === 408 || status === 425 || status === 429 || status >= 500
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
 
 function resolvePublicApiBase() {

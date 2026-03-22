@@ -340,14 +340,12 @@ export function useWorkspaceController(appMode: 'admin' | 'user') {
         ? await askTopicAssistant({ topicId: selectedTopicListItem.id, question })
         : normalizePublicChatResult(await askPublicTopic({ topicId: selectedTopicListItem.id, question }), selectedTopicListItem.moduleKey)
       setTopicAnswer(result)
-      await loadTopicDetail(selectedTopicListItem.id)
       if (appMode === 'admin') {
+        await loadTopicDetail(selectedTopicListItem.id)
         await refreshBotStatus(false, {
           preserveTopicSummary: true,
           preserveTopicAnswer: true,
         })
-      } else {
-        await loadTopics(false)
       }
       if (result.qualityStatus === 'accepted') {
         setActivity('Resposta validada pela IA.')
