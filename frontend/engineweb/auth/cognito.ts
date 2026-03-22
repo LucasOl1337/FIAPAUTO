@@ -1,9 +1,10 @@
+import { resolvePublicApiBase } from '../publicApiBase.ts'
+
 type PublicAuthMode = 'local' | 'none'
 
 const authMode = normalizeAuthMode(import.meta.env.VITE_PUBLIC_AUTH_MODE)
 const LOCAL_AUTH_SESSION_KEY = 'fiapauto.publicAuth.session'
 const LOCAL_AUTH_TOKEN_KEY = 'fiapauto.publicAuth.token'
-const PUBLIC_API_TUNNEL = 'https://ricky-expo-doors-documents.trycloudflare.com'
 
 export function getPublicAuthMode(): PublicAuthMode {
   return authMode
@@ -227,26 +228,4 @@ async function requestLocalAuth<T = unknown>(
   }
 
   return (await response.json()) as T
-}
-
-function resolvePublicApiBase() {
-  const explicitCandidates = [
-    import.meta.env.VITE_PUBLIC_API_BASE_URL,
-    import.meta.env.VITE_API_BASE_URL,
-  ]
-    .map((value) => value?.trim() ?? '')
-    .filter(Boolean)
-
-  const explicitBase = explicitCandidates.find((value) => !shouldIgnoreExplicitApiBase(value))
-  return (explicitBase || PUBLIC_API_TUNNEL).replace(/\/+$/, '')
-}
-
-function shouldIgnoreExplicitApiBase(value: string) {
-  try {
-    const hostname = new URL(value).hostname
-    const currentHostname = typeof window === 'undefined' ? '' : window.location.hostname
-    return /^(127\.0\.0\.1|localhost)$/i.test(hostname) && !/^(127\.0\.0\.1|localhost)$/i.test(currentHostname)
-  } catch {
-    return false
-  }
 }

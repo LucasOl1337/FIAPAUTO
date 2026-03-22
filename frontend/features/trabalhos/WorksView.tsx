@@ -225,7 +225,14 @@ function buildFullAnswerItems(answer: ParsedAssistantAnswer) {
 }
 
 function compactAnswerItems(items: string[], limit: number) {
-  return items.map((item) => sanitizeAssistantText(item)).filter(Boolean).map((item) => normalizeDisplayItem(item)).filter(Boolean).filter((item, index, array) => array.findIndex((candidate) => candidate.toLowerCase() === item.toLowerCase()) === index).slice(0, limit)
+  return dedupeAssistantItems(
+    items
+      .flatMap((item) => expandAnswerDisplayItems(item))
+      .map((item) => normalizeDisplayItem(item))
+      .filter(Boolean)
+      .filter((item) => !looksLikeRepeatedOperationalRule(item))
+      .filter((item) => !/\b(prazo|07:45|08:00|23:59)\b/i.test(item)),
+  ).slice(0, limit)
 }
 
 function compactAttentionItems(items: string[], limit: number) {
@@ -242,6 +249,13 @@ function sanitizeAssistantText(value: string) {
   return withoutMarkdown
 }
 
+function expandAnswerDisplayItems(value: string) {
+  return sanitizeAssistantText(value)
+    .split(/\s*;\s*|\.\s+(?=[A-Z0-9])/)
+    .map((item) => sanitizeAssistantText(item))
+    .filter(Boolean)
+}
+
 function expandCompositeText(value: string) {
   return sanitizeAssistantText(value).split(/\s*;\s*|\.\s+(?=[A-Z0-9])/).map((item) => sanitizeAssistantText(item)).filter(Boolean)
 }
@@ -251,6 +265,7 @@ function normalizeDisplayItem(value: string) {
   if (/(apresenta|slide)/i.test(cleaned) && /pdf/i.test(cleaned)) return 'Apresentacao em PDF'
   if (/(formular|questionario|pesquisa)/i.test(cleaned) && /pdf/i.test(cleaned)) return 'Formulario ou pesquisa em PDF'
   if (/(base de dados|planilha|excel|xlsx)/i.test(cleaned)) return 'Base de dados em Excel'
+  if (/(apresentacao oral|oral individual)/i.test(cleaned)) return 'Apresentacao oral individual'
   if (looksLikeRawMetadata(cleaned)) return ''
   return cleaned
 }
@@ -265,7 +280,7 @@ function isUsefulAttentionDisplay(value: string) {
 }
 
 function looksLikeRawMetadata(value: string) {
-  return /(checkpoint.*docx|arquivo "|disciplina|professor|semestre|1tiapf|tecnologo|statistical computing|rodolfo|curso|modulo)/i.test(value)
+  return /(checkpoint.*docx|arquivo "|disciplina|professor|semestre|1tiapf|tecnologo|statistical computing|rodolfo|curso|modulo|teams\.microsoft|link de detalhe|status)/i.test(value)
 }
 
 function looksLikeRepeatedOperationalRule(value: string) {

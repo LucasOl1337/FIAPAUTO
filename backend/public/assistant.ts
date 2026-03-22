@@ -42,7 +42,7 @@ export async function answerPublishedTopicQuestion(input: {
 }) {
   const intent = classifyQuestionIntent(input.question)
   const scopedChunks = input.chunks.filter((chunk) => chunk.topicId === input.topic.id)
-  const rankedChunks = rankChunks(scopedChunks, input.question)
+  const rankedChunks = rankChunks(scopedChunks, input.question, intent)
   const citations = rankedChunks.slice(0, 3).map((chunk) => ({
     sourceType: chunk.sourceType === 'overview' ? 'summary' : chunk.sourceType,
     sourceLabel: `${input.topic.title} / ${chunk.sourceType}`,
@@ -62,7 +62,7 @@ export async function answerPublishedTopicQuestion(input: {
     intent,
   })
   const documents = buildDocuments(input.topic, citations)
-  const images = await readTopicImages(input.topic)
+  const images = shouldAttachTopicImages(input.question) ? await readTopicImages(input.topic) : []
 
   try {
     const primary = await routeAssistantChat({
@@ -285,12 +285,14 @@ function buildResponseSections(input: {
   nextSteps: string[]
   followUpQuestions: string[]
 }): PublicChatResponse['sections'] {
-  const deliverables = dedupeItems(input.deliverables).slice(0, 3)
-  const attentionPoints = dedupeItems(input.attentionPoints).slice(0, 3)
-  const nextSteps = dedupeItems(input.nextSteps).slice(0, 3)
+  const deliverables = cleanDeliverableItems(input.deliverables).slice(0, 3)
+  const attentionPoints = cleanAttentionItems(input.attentionPoints).slice(0, 3)
+  const nextSteps = cleanNextStepItems(input.nextSteps).slice(0, 3)
+  const summary10s = buildSafeSummary(input.summary10s, deliverables, nextSteps)
+  const fullAnswer = cleanFullAnswerItems(input.fullAnswer).slice(0, 4)
   return {
-    summary10s: sanitizeAnswerText(input.summary10s) || 'Nao encontrei isso no material',
-    fullAnswer: dedupeItems(input.fullAnswer).slice(0, 3),
+    summary10s,
+    fullAnswer: fullAnswer.length > 0 ? fullAnswer : [summary10s],
     deliverables,
     attentionPoints,
     nextSteps,
@@ -352,22 +354,31 @@ function buildDirectFallback(input: {
   deliverables: string[]
 }) {
   const normalizedQuestion = normalizeText(input.question)
-  const summaryBase = input.topic.summary || input.topic.agentMemory?.overview || input.citations[0]?.snippet || ''
+  const summaryBase = buildContextOverview(input.topic, input.citations)
+  const attentionItems = buildAttentionItems(input.topic, input.citations)
+  const cleanDeliverables = cleanDeliverableItems(input.deliverables)
   const toolContext = getToolUsageContext({
     topic: input.topic,
     citations: input.citations,
     question: input.question,
   })
 
+  if (input.intent === 'smalltalk_or_noise') {
+    return `Sua pergunta ficou vaga. Pergunte algo direto sobre ${input.topic.title}, como entregaveis, checklist ou pontos de atencao.`
+  }
+
+  if (input.intent === 'off_topic_learning') {
+    return `Posso explicar o conceito de forma curta e depois conectar isso com ${input.topic.title}.`
+  }
+
   if (input.intent === 'deliverable') {
-    return input.deliverables.length > 0
-      ? `Voce precisa focar nestes entregaveis principais: ${input.deliverables.join(', ')}.`
-      : 'Nao encontrei uma lista fechada de entregaveis no material publicado.'
+    return cleanDeliverables.length > 0
+      ? `Os entregaveis principais desta materia sao ${cleanDeliverables.join(', ')}.`
+      : `Posso te ajudar melhor se voce perguntar pelo checklist ou abrir o anexo principal de ${input.topic.title}.`
   }
 
   if (input.intent === 'grading' || input.intent === 'format') {
-    const risk = buildAttentionItems(input.topic, input.citations)[0]
-    return risk || 'Nao encontrei um criterio detalhado, mas ha pontos de atencao importantes no material.'
+    return attentionItems[0] || `Os pontos de atencao desta materia ficam mais claros quando voce olha o checklist e os criterios do anexo principal.`
   }
 
   if (input.intent === 'tool_usage') {
@@ -392,17 +403,17 @@ function buildDirectFallback(input: {
     }
 
     if (summaryBase) {
-      return `Para fazer ${input.topic.title} sem se enrolar, foque primeiro no objetivo central e siga uma sequencia curta de execucao.`
+      return `Para avancar em ${input.topic.title}, comece pelo entregavel principal e siga um passo de cada vez.`
     }
   }
 
   if (input.intent === 'summary' || input.intent === 'greeting') {
-    return summaryBase || `Vou te ajudar com ${input.topic.title} pelo ponto mais util do material publicado.`
+    return summaryBase || `Posso resumir ${input.topic.title}, listar entregaveis ou montar um checklist curto.`
   }
 
   return input.citations[0]?.snippet
     || summaryBase
-    || `Vou te responder pelo que esta publicado em ${input.topic.title}.`
+    || `Pergunte algo mais especifico sobre ${input.topic.title}, como entregaveis, formato ou checklist.`
 }
 
 function buildPrompt(input: {
@@ -424,12 +435,28 @@ function buildPrompt(input: {
     .slice(0, 4)
     .map((item) => `- ${item}`)
     .join('\n')
-  const keyFacts = (input.topic.agentMemory?.keyFacts ?? [])
-    .slice(0, 8)
-    .map((item) => `- ${item}`)
-    .join('\n')
+  const deliverables = buildDeliverableItems(input.topic, input.rankedChunks.slice(0, 6).map((chunk) => ({
+    sourceType: chunk.sourceType === 'overview' ? 'summary' : chunk.sourceType,
+    sourceLabel: `${input.topic.title} / ${chunk.sourceType}`,
+    snippet: chunk.text,
+  })) satisfies Citation[])
+  const attention = buildAttentionItems(input.topic, input.rankedChunks.slice(0, 6).map((chunk) => ({
+    sourceType: chunk.sourceType === 'overview' ? 'summary' : chunk.sourceType,
+    sourceLabel: `${input.topic.title} / ${chunk.sourceType}`,
+    snippet: chunk.text,
+  })) satisfies Citation[])
+  const nextSteps = buildActionableSteps({
+    topic: input.topic,
+    question: input.question,
+    intent: input.intent,
+    citations: input.rankedChunks.slice(0, 6).map((chunk) => ({
+      sourceType: chunk.sourceType === 'overview' ? 'summary' : chunk.sourceType,
+      sourceLabel: `${input.topic.title} / ${chunk.sourceType}`,
+      snippet: chunk.text,
+    })) satisfies Citation[],
+  })
   const chunkBlock = input.rankedChunks
-    .map((chunk, index) => `[${index + 1}] ${chunk.sourceType}: ${chunk.text}`)
+    .map((chunk, index) => `[${index + 1}] ${chunk.sourceType}: ${cleanProviderSnippet(chunk.text)}`)
     .join('\n\n')
   const toolContext = getToolUsageContext({
     topic: input.topic,
@@ -442,30 +469,34 @@ function buildPrompt(input: {
   })
 
   return [
-    'Voce e o assistente publico do FIAPAUTO.',
-    'Responda em portugues do Brasil, de forma objetiva, natural e util para um aluno cansado e com pressa.',
-    'A resposta precisa ser autosuficiente: curta, clara e util sem depender de texto extra.',
-    'Use apenas o material fornecido. Se algo nao estiver confirmado, diga explicitamente que nao encontrou.',
-    'Se a pergunta for vaga, pratica ou de ajuda ("como fazer", "nao entendi", "me da uma dica"), transforme isso em orientacao executavel com base no trabalho real.',
-    'Nunca responda so com uma frase vaga, so com uma saudacao, ou so com "nao encontrei".',
+    'Voce e o assistente publico do FiapFlow.',
+    'Responda em portugues do Brasil, de forma objetiva, natural e util para um aluno com pouco tempo.',
+    'Sua resposta precisa ser clara, curta e visualmente limpa.',
+    'Use apenas fatos confirmados do material e ignore ruido administrativo.',
+    'Ignore prazo, data, horario, status, modulo, professor, nome bruto de arquivo, links e metadados administrativos.',
+    'Nunca diga "nao encontrei isso no material", "nao sei" ou frases equivalentes.',
+    'Se a pergunta for vaga ou ruido, nao invente resposta academica: peca uma reformulacao curta e ofereca 2 exemplos uteis.',
+    'Se a pergunta sair da materia, explique em no maximo 2 frases e reconecte com a atividade atual.',
+    'Nao repita a mesma ideia em mais de um bloco.',
     '',
     `Intencao principal da pergunta: ${input.intent}`,
     `Materia: ${input.topic.title}`,
-    `Curso: ${input.topic.course}`,
-    `Modulo: ${input.topic.moduleKey}`,
-    `Status: ${input.topic.status}`,
     '',
-    'Resumo publicado:',
-    input.topic.summary || 'Nao existe resumo publicado.',
+    'Visao geral limpa:',
+    buildContextOverview(input.topic, input.rankedChunks.slice(0, 6).map((chunk) => ({
+      sourceType: chunk.sourceType === 'overview' ? 'summary' : chunk.sourceType,
+      sourceLabel: `${input.topic.title} / ${chunk.sourceType}`,
+      snippet: chunk.text,
+    })) satisfies Citation[]) || 'Sem visao geral limpa.',
     '',
-    'Memoria do agente:',
-    input.topic.agentMemory?.overview || 'Nao existe memoria publicada.',
+    'Entregaveis limpos:',
+    deliverables.map((item) => `- ${item}`).join('\n') || '- Nenhum entregavel limpo identificado.',
     '',
-    'Entregaveis conhecidos:',
-    (input.topic.agentMemory?.deliverables ?? []).map((item) => `- ${item}`).join('\n') || '- Nenhum entregavel confirmado.',
+    'Pontos de atencao limpos:',
+    attention.map((item) => `- ${item}`).join('\n') || '- Nenhum ponto de atencao limpo identificado.',
     '',
-    'Fatos importantes:',
-    keyFacts || '- Nenhum fato importante publicado.',
+    'Proximos passos seguros:',
+    nextSteps.map((item) => `- ${item}`).join('\n') || '- Nenhum proximo passo limpo identificado.',
     '',
     'FAQ / aprendizado:',
     learningFaq || '- Nenhum FAQ publicado.',
@@ -488,12 +519,14 @@ function buildPrompt(input: {
     'PROXIMO PASSO:',
     '',
     'Regras do formato:',
-    '- Seja curto, concreto e sem floreio.',
-    '- Preencha todos os blocos com algo util.',
-    '- Se um bloco nao tiver informacao confirmada, diga exatamente "Nao encontrei isso no material".',
-    '- Para pergunta pratica, o bloco PROXIMO PASSO deve trazer acao executavel.',
-    '- Nao use markdown, tabela, pipe, asterisco, titulos com # ou texto decorativo.',
-    '- Nao invente dados, regras ou entregaveis.',
+    '- RESPOSTA DIRETA: 1 ou 2 frases curtas respondendo exatamente a pergunta.',
+    '- O QUE ENTREGAR: 0 a 3 bullets limpos, apenas itens humanos e curtos.',
+    '- ATENCAO: 0 a 3 bullets curtos, um risco por linha, sem repetir prazo.',
+    '- PROXIMO PASSO: 1 a 3 bullets acionaveis, em ordem pratica.',
+    '- Se um bloco nao tiver valor real, deixe o bloco vazio depois dos dois pontos.',
+    '- Nao use markdown, tabela, pipe, titulo com #, bloco de codigo ou texto decorativo.',
+    '- Nao copie links, nomes de arquivo crus ou cabecalhos administrativos.',
+    '- Cada bullet deve caber bem em uma interface compacta.',
     ...(input.intent === 'tool_usage'
       ? [
           '- Esta e uma pergunta de ferramenta/execucao.',
@@ -525,10 +558,11 @@ function buildRetryPrompt(input: {
     '',
     'Agora corrija com estas exigencias extras:',
     '- Primeiro responda a duvida principal sem enrolar.',
+    '- Remova links, prazo, horario, professor, curso, modulo, status e nome bruto de arquivo.',
     '- Se a pergunta pedir dica, caminho, ajuda pratica ou "nao entendi", transforme isso em orientacao de execucao.',
-    '- Se o material nao falar exatamente do termo perguntado, explique isso e redirecione para o que o trabalho realmente exige.',
+    '- Se a pergunta for vaga, peca reformulacao curta e ofereca dois exemplos uteis.',
     '- Nao diga para consultar documentacao generica.',
-    '- Nao devolva apenas titulo, frase motivacional ou resumo vago.',
+    '- Nao devolva apenas titulo, frase motivacional, resumo vago ou texto copiado do PDF.',
     '- Mantenha os mesmos blocos obrigatorios.',
     ...(input.intent === 'tool_usage'
       ? [
@@ -546,18 +580,21 @@ function buildRetryPrompt(input: {
 
 function buildDocuments(topic: PublicTopic, citations: Citation[]) {
   const normalizedLearning = normalizeLearning(topic.learning)
+  const deliverables = buildDeliverableItems(topic, citations)
+  const attention = buildAttentionItems(topic, citations)
 
   return [
     {
       name: `${topic.id}.summary.txt`,
-      content: topic.summary || '',
+      content: buildContextOverview(topic, citations),
     },
     {
       name: `${topic.id}.memory.txt`,
       content: JSON.stringify({
-        overview: topic.agentMemory?.overview ?? '',
-        deliverables: topic.agentMemory?.deliverables ?? [],
-        keyFacts: topic.agentMemory?.keyFacts ?? [],
+        overview: buildContextOverview(topic, citations),
+        deliverables,
+        attention,
+        keyFacts: cleanAttentionItems(topic.agentMemory?.keyFacts ?? []).slice(0, 5),
       }),
     },
     {
@@ -570,7 +607,7 @@ function buildDocuments(topic: PublicTopic, citations: Citation[]) {
     },
     {
       name: `${topic.id}.citations.txt`,
-      content: citations.map((item) => `${item.sourceType}: ${item.snippet}`).join('\n'),
+      content: citations.map((item) => `${item.sourceType}: ${cleanProviderSnippet(item.snippet)}`).join('\n'),
     },
   ].filter((item) => item.content.trim())
 }
@@ -603,21 +640,24 @@ async function readTopicImages(topic: PublicTopic) {
 
 function buildDeliverableItems(topic: PublicTopic, citations: Citation[]) {
   const summaryItems = extractDeliverableSignals(topic.summary || '')
+  const memoryItems = (topic.agentMemory?.deliverables ?? []).flatMap((item) => extractDeliverableSignals(item))
+  const attachmentItems = topic.attachments.map((item) => normalizeDeliverableSignal(item.name))
   const citationItems = citations
-    .filter((item) => item.sourceType === 'deliverable' || /pdf|excel|xlsx|apresenta|formulario|planilha|arquivo/i.test(item.snippet))
+    .filter((item) => item.sourceType === 'deliverable' || /pdf|excel|xlsx|apresenta|formulario|planilha|oral|pesquisa|questionario/i.test(item.snippet))
     .flatMap((item) => extractDeliverableSignals(item.snippet))
 
-  const values = dedupeItems([
-    ...(topic.agentMemory?.deliverables ?? []).filter((item) => sanitizeAnswerText(item).length <= 120),
+  const values = cleanDeliverableItems([
+    ...memoryItems,
     ...summaryItems,
     ...citationItems,
-  ]).filter(Boolean)
+    ...attachmentItems,
+  ])
 
   if (values.length > 0) {
     return values.slice(0, 3)
   }
 
-  return ['Nao encontrei isso no material']
+  return []
 }
 
 function buildActionableSteps(input: {
@@ -641,6 +681,17 @@ function buildActionableSteps(input: {
     }
   }
 
+  if (input.intent === 'smalltalk_or_noise') {
+    return [
+      'Pergunte algo direto, como "o que preciso entregar?" ou "me faca um checklist".',
+      `Se quiser, eu posso resumir ${input.topic.title} em linguagem simples.`,
+    ]
+  }
+
+  if (input.intent === 'off_topic_learning') {
+    steps.push('Aprenda o conceito em duas ou tres ideias simples e depois aplique isso ao entregavel atual.')
+  }
+
   if (input.intent === 'deliverable') {
     steps.push('Monte uma checklist curta dos arquivos que precisam ser enviados antes de produzir a versao final.')
   }
@@ -653,36 +704,50 @@ function buildActionableSteps(input: {
   }
 
   if (input.intent === 'next_steps' || input.intent === 'explanation' || input.intent === 'unknown') {
-    steps.push(`Leia o resumo de ${input.topic.title} e transforme o objetivo em 2 ou 3 tarefas praticas.`)
+    steps.push(`Transforme ${input.topic.title} em 2 ou 3 tarefas praticas antes de executar.`)
   }
 
   steps.push('Abra o anexo principal para validar detalhes finos antes de executar.')
 
-  if ((input.topic.agentMemory?.deliverables ?? []).length > 0) {
-    steps.push(`Prepare primeiro os entregaveis principais: ${input.topic.agentMemory!.deliverables.slice(0, 2).join(' e ')}.`)
+  const deliverables = buildDeliverableItems(input.topic, input.citations)
+  if (deliverables.length > 0) {
+    steps.push(`Prepare primeiro os entregaveis principais: ${deliverables.slice(0, 2).join(' e ')}.`)
   } else {
     steps.push('Monte uma checklist curta com entregaveis, formato e validacoes finais.')
   }
 
-  return dedupeItems(steps).slice(0, 3)
+  return cleanNextStepItems(steps).slice(0, 3)
 }
 
 function buildAttentionItems(topic: PublicTopic, citations: Citation[]) {
-  const fromFacts = (topic.agentMemory?.keyFacts ?? [])
-    .filter((item) => /atras|atenc|maximo|zero|abnt|sem|cancela|penalidade|avali|link|nota|erro/i.test(item))
-  if (fromFacts.length > 0) {
-    return fromFacts.slice(0, 3)
+  const sourceText = normalizeText([
+    ...(topic.agentMemory?.keyFacts ?? []),
+    ...citations.map((item) => item.snippet),
+    topic.summary,
+  ].filter(Boolean).join(' '))
+  const items: string[] = []
+
+  if (/\b100\b.*respondent|dados fictic/.test(sourceText)) {
+    items.push('Use respondentes reais e nao inclua dados ficticios.')
+  }
+  if (/ausencia.*oral|nota zero|particip/.test(sourceText)) {
+    items.push('Garanta a participacao oral de quem for avaliado.')
+  }
+  if (/abnt|sem links|formatos? sem links/.test(sourceText)) {
+    items.push('Siga ABNT e nao deixe links nos arquivos finais.')
+  }
+  if (/nome completo|matricul/.test(sourceText)) {
+    items.push('Inclua nome completo e matricula em cada arquivo.')
+  }
+  if (/maximo 6 por grupo/.test(sourceText)) {
+    items.push('Mantenha o grupo dentro do limite de integrantes.')
   }
 
-  const fromCitations = citations
-    .map((item) => item.snippet)
-    .filter((item) => /atras|atenc|maximo|zero|abnt|sem|cancela|penalidade|avali|link|nota|erro/i.test(item))
-
-  if (fromCitations.length > 0) {
-    return fromCitations.slice(0, 3)
+  if (items.length > 0) {
+    return cleanAttentionItems(items).slice(0, 3)
   }
 
-  return ['Confirme os detalhes finos no anexo principal antes de entregar.']
+  return cleanAttentionItems(['Confirme no PDF principal os criterios finais antes de enviar.']).slice(0, 1)
 }
 
 function evaluateAnswerQuality(input: {
@@ -705,6 +770,7 @@ function evaluateAnswerQuality(input: {
     || /^posso te ajudar/.test(combinedDirect)
     || /^nao encontrei isso no material$/.test(combinedDirect)
     || /^nao encontrei no material/.test(combinedDirect) && hasRelevantContext && input.parsed.nextSteps.length === 0
+    || looksLikeRawMetadata(input.parsed.direct)
 
   if (directLooksGeneric) {
     missingSections.push('RESPOSTA DIRETA')
@@ -712,13 +778,13 @@ function evaluateAnswerQuality(input: {
 
   switch (input.intent) {
     case 'deliverable':
-      if (input.parsed.deliverables.length === 0 && !/entrega|arquivo|pdf|excel|anexo|nao encontrei/.test(combinedAll)) {
+      if (cleanDeliverableItems(input.parsed.deliverables).length === 0 && !/entrega|arquivo|pdf|excel|anexo/.test(combinedAll)) {
         missingSections.push('O QUE ENTREGAR')
       }
       break
     case 'grading':
     case 'format':
-      if (input.parsed.attention.length === 0 && !/atras|penalidade|erro|abnt|nota|formato|risco|zero/.test(combinedAll)) {
+      if (cleanAttentionItems(input.parsed.attention).length === 0 && !/penalidade|erro|abnt|nota|formato|risco|zero/.test(combinedAll)) {
         missingSections.push('ATENCAO')
       }
       break
@@ -726,8 +792,14 @@ function evaluateAnswerQuality(input: {
     case 'next_steps':
     case 'explanation':
     case 'unknown':
+    case 'off_topic_learning':
       if (!hasActionableStep(input.parsed.nextSteps) && !/\bfa(ca|ca|zer)|abra|prepare|confirme|ignore|foco|siga|valide|use\b/.test(combinedAll)) {
         missingSections.push('PROXIMO PASSO')
+      }
+      break
+    case 'smalltalk_or_noise':
+      if (!/\b(pergunte|reformule|exemplo|entregaveis|checklist|pontos de atencao)\b/.test(combinedAll)) {
+        missingSections.push('RESPOSTA DIRETA')
       }
       break
     case 'summary':
@@ -742,6 +814,15 @@ function evaluateAnswerQuality(input: {
       break
     default:
       break
+  }
+
+  if ([...input.parsed.deliverables, ...input.parsed.attention, ...input.parsed.nextSteps].some(looksLikeBadPublicOutput)) {
+    if (!missingSections.includes('O QUE ENTREGAR')) {
+      missingSections.push('O QUE ENTREGAR')
+    }
+    if (!missingSections.includes('ATENCAO')) {
+      missingSections.push('ATENCAO')
+    }
   }
 
   if (/\bpython\b|\bcodigo\b|\bscript\b/.test(normalizeText(input.question))) {
@@ -866,18 +947,27 @@ function formatStructuredAnswer(input: {
   attention: string[]
   nextSteps: string[]
 }) {
-  return [
-    `RESPOSTA DIRETA: ${sanitizeAnswerText(input.direct) || 'Nao encontrei isso no material'}`,
-    `O QUE ENTREGAR: ${formatSectionItems(input.deliverables, 'Nao encontrei isso no material')}`,
-    `ATENCAO: ${formatSectionItems(input.attention, 'Nao encontrei isso no material')}`,
-    `PROXIMO PASSO: ${formatSectionItems(input.nextSteps, 'Nao encontrei isso no material')}`,
-  ].join('\n')
+  const lines = [`RESPOSTA DIRETA: ${sanitizeAnswerText(input.direct) || 'Pergunte de forma mais especifica sobre esta materia.'}`]
+  const deliverables = formatSectionItems(cleanDeliverableItems(input.deliverables))
+  const attention = formatSectionItems(cleanAttentionItems(input.attention))
+  const nextSteps = formatSectionItems(cleanNextStepItems(input.nextSteps))
+  if (deliverables) {
+    lines.push(`O QUE ENTREGAR: ${deliverables}`)
+  }
+  if (attention) {
+    lines.push(`ATENCAO: ${attention}`)
+  }
+  if (nextSteps) {
+    lines.push(`PROXIMO PASSO: ${nextSteps}`)
+  }
+
+  return lines.join('\n')
 }
 
-function formatSectionItems(items: string[], fallback: string) {
+function formatSectionItems(items: string[]) {
   const visibleItems = dedupeItems(items.map((item) => sanitizeAnswerText(item))).filter(Boolean)
   if (visibleItems.length === 0) {
-    return fallback
+    return ''
   }
 
   return visibleItems.slice(0, 3).map((item) => `- ${item}`).join(' ')
@@ -892,6 +982,14 @@ function buildSuggestedQuestions(intent: QuestionIntent) {
     return ['Isso e obrigatorio ou opcional?', 'Me faca um checklist sem usar codigo', 'Como faco isso sem me perder?']
   }
 
+  if (intent === 'smalltalk_or_noise') {
+    return ['O que preciso entregar?', 'Me faca um checklist', 'O que pode me fazer perder pontos?']
+  }
+
+  if (intent === 'off_topic_learning') {
+    return ['Explique este trabalho de forma simples', 'Como aplico isso nesta atividade?', 'Me faca um checklist']
+  }
+
   if (intent === 'next_steps' || intent === 'explanation' || intent === 'unknown') {
     return ['Me faca um checklist', 'Explique este trabalho de forma simples', 'O que preciso entregar?']
   }
@@ -899,10 +997,9 @@ function buildSuggestedQuestions(intent: QuestionIntent) {
   return ['O que preciso entregar?', 'Me faca um checklist', 'O que pode me fazer perder pontos?']
 }
 
-function rankChunks(chunks: PublishedKnowledgeChunk[], question: string) {
+function rankChunks(chunks: PublishedKnowledgeChunk[], question: string, intent: QuestionIntent) {
   const tokens = tokenize(question)
-
-  return chunks
+  const ranked = chunks
     .map((chunk) => ({
       chunk,
       score: tokens.reduce((total, token) => {
@@ -910,7 +1007,20 @@ function rankChunks(chunks: PublishedKnowledgeChunk[], question: string) {
         if (normalizeText(chunk.text).includes(token)) nextTotal += 1
         if (chunk.keywords.map((item) => normalizeText(item)).includes(token)) nextTotal += 2
         return nextTotal
-      }, chunk.sourceType === 'faq' ? 1 : 0),
+      }, 0) + sourceTypeIntentBoost(chunk.sourceType, intent, question),
+    }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map((item) => item.chunk)
+
+  if (ranked.length > 0) {
+    return ranked
+  }
+
+  return chunks
+    .map((chunk) => ({
+      chunk,
+      score: fallbackChunkScore(chunk, intent),
     }))
     .filter((item) => item.score > 0)
     .sort((a, b) => b.score - a.score)
@@ -939,6 +1049,7 @@ function sanitizeAnswerText(value: string) {
     .replace(/^>\s*/g, '')
     .replace(/^#{1,6}\s*/g, '')
     .replace(/\s*\|\s*/g, ' - ')
+    .replace(/```[\s\S]*?```/g, ' ')
     .replace(/<br\s*\/?>/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim()
@@ -985,10 +1096,10 @@ function extractDeliverableSignals(text: string) {
   const results: string[] = []
   for (const pattern of matches) {
     const found = normalized.match(pattern) ?? []
-    results.push(...found.map((item) => sanitizeAnswerText(item)))
+    results.push(...found.map((item) => normalizeDeliverableSignal(item)))
   }
 
-  return dedupeItems(results).filter((item) => item.length <= 120)
+  return cleanDeliverableItems(results)
 }
 
 function extractToolLabel(question: string) {
@@ -1050,4 +1161,138 @@ function normalizeLearning(learning: PublicTopic['learning']) {
     learningTopics: learning.learningTopics ?? legacyTopics,
     quickTips: learning.quickTips ?? [],
   }
+}
+
+function shouldAttachTopicImages(question: string) {
+  return /\b(print|imagem|screenshot|tela|diagrama|grafico)\b/i.test(question)
+}
+
+function buildSafeSummary(summary: string, deliverables: string[], nextSteps: string[]) {
+  const cleaned = sanitizeAnswerText(summary)
+  if (cleaned && !looksLikeBadPublicOutput(cleaned)) {
+    return cleaned
+  }
+  if (deliverables[0]) {
+    return `Os entregaveis principais sao ${deliverables.slice(0, 2).join(' e ')}.`
+  }
+  if (nextSteps[0]) {
+    return nextSteps[0]
+  }
+  return 'Pergunte de forma mais especifica sobre esta materia.'
+}
+
+function buildContextOverview(topic: PublicTopic, citations: Citation[]) {
+  const candidates = [
+    topic.summary,
+    topic.agentMemory?.overview,
+    ...citations.map((item) => item.snippet),
+  ]
+    .map((item) => cleanProviderSnippet(item ?? ''))
+    .filter(Boolean)
+
+  return dedupeItems(candidates).find((item) => !looksLikeRawMetadata(item)) ?? ''
+}
+
+function cleanProviderSnippet(value: string) {
+  return sanitizeAnswerText(value)
+    .replace(/\b(pergunta|resposta):\s*/gi, '')
+    .replace(/\b(prazo|data|horario)\b.*$/gi, '')
+    .replace(/\b(link de detalhe|status|curso|modulo sugerido|arquivos baixados)\b.*$/gi, '')
+    .replace(/https?:\/\/\S+/gi, '')
+    .trim()
+}
+
+function cleanDeliverableItems(values: string[]) {
+  return dedupeItems(values.map((item) => normalizeDeliverableSignal(item)).filter(isUsefulDeliverableSignal))
+}
+
+function cleanAttentionItems(values: string[]) {
+  return dedupeItems(
+    values
+      .flatMap((item) => sanitizeAnswerText(item).split(/\s*;\s*|\.\s+(?=[A-Z0-9])/))
+      .map((item) => sanitizeAnswerText(item))
+      .map((item) => item.replace(/^pontos?\s+de\s+atencao:\s*/i, ''))
+      .map((item) => item.replace(/\b(atraso superior a 15 minutos|07:45|08:00|23:59)\b.*$/i, ''))
+      .map((item) => item.replace(/\b(link de detalhe|teams\.microsoft)\b.*$/i, ''))
+      .filter((item) => item.length > 10 && item.length <= 120)
+      .filter((item) => !looksLikeRawMetadata(item))
+      .filter((item) => !/\b(prazo|horario|data)\b/i.test(item)),
+  )
+}
+
+function cleanNextStepItems(values: string[]) {
+  return dedupeItems(
+    values
+      .flatMap((item) => sanitizeAnswerText(item).split(/\s*;\s*|\.\s+(?=[A-Z0-9])/))
+      .map((item) => sanitizeAnswerText(item.replace(/^\d+\.\s*/, '')))
+      .map((item) => item.replace(/\b(link de detalhe|teams\.microsoft)\b.*$/i, ''))
+      .filter((item) => item.length > 12 && item.length <= 120)
+      .filter((item) => !looksLikeRawMetadata(item)),
+  )
+}
+
+function cleanFullAnswerItems(values: string[]) {
+  return dedupeItems(
+    values
+      .flatMap((item) => sanitizeAnswerText(item).split(/\n+|\s*;\s*/))
+      .map((item) => sanitizeAnswerText(item))
+      .filter((item) => item.length > 16 && item.length <= 180)
+      .filter((item) => !looksLikeBadPublicOutput(item)),
+  )
+}
+
+function normalizeDeliverableSignal(value: string) {
+  const cleaned = sanitizeAnswerText(value)
+    .replace(/^arquivo:\s*/i, '')
+    .replace(/\.pdf$/i, ' PDF')
+    .replace(/\.docx$/i, '')
+    .replace(/\.xlsx$/i, ' Excel')
+    .replace(/[_-]+/g, ' ')
+    .trim()
+
+  if (/(apresenta|slide)/i.test(cleaned) && /pdf/i.test(cleaned)) return 'Apresentacao em PDF'
+  if (/(formular|questionario|pesquisa)/i.test(cleaned) && /pdf/i.test(cleaned)) return 'Formulario ou pesquisa em PDF'
+  if (/(base de dados|planilha|excel|xlsx)/i.test(cleaned)) return 'Base de dados em Excel'
+  if (/(apresentacao oral|oral individual|apresenta[cç][aã]o oral)/i.test(cleaned)) return 'Apresentacao oral individual'
+  if (/respondentes reais|pesquisa em grupo/i.test(cleaned)) return 'Pesquisa com respondentes reais'
+  return cleaned
+}
+
+function isUsefulDeliverableSignal(value: string) {
+  const cleaned = sanitizeAnswerText(value)
+  return Boolean(cleaned)
+    && cleaned.length >= 4
+    && cleaned.length <= 60
+    && !looksLikeRawMetadata(cleaned)
+    && !/\b(prazo|horario|data|status|curso|modulo|professor|teams\.microsoft|checkpoint.*docx|\.py)\b/i.test(cleaned)
+}
+
+function looksLikeBadPublicOutput(value: string) {
+  const normalized = sanitizeAnswerText(value)
+  return !normalized
+    || looksLikeRawMetadata(normalized)
+    || /\bnao encontrei isso no material\b/i.test(normalized)
+    || /\bnao sei\b/i.test(normalized)
+    || /\b(prazo|07:45|08:00|23:59|atraso superior a 15 minutos)\b/i.test(normalized)
+}
+
+function sourceTypeIntentBoost(sourceType: PublishedKnowledgeChunk['sourceType'], intent: QuestionIntent, question: string) {
+  if (intent === 'deliverable' && sourceType === 'deliverable') return 3
+  if ((intent === 'grading' || intent === 'format') && sourceType === 'faq') return 2
+  if ((intent === 'summary' || intent === 'explanation') && sourceType === 'summary') return 2
+  if (intent === 'tool_usage' && /\bpython\b|\br\b|\bcodigo\b|\bscript\b/i.test(question) && sourceType === 'content') return 2
+  if (intent === 'smalltalk_or_noise' && sourceType === 'summary') return 1
+  return 0
+}
+
+function fallbackChunkScore(chunk: PublishedKnowledgeChunk, intent: QuestionIntent) {
+  if (intent === 'deliverable' && chunk.sourceType === 'deliverable') return 4
+  if ((intent === 'summary' || intent === 'explanation') && (chunk.sourceType === 'summary' || chunk.sourceType === 'overview')) return 3
+  if (intent === 'tool_usage' && chunk.sourceType === 'content') return 2
+  if (chunk.sourceType === 'faq') return 1
+  return 0
+}
+
+function looksLikeRawMetadata(value: string) {
+  return /(teams\.microsoft|status:|curso:|modulo sugerido|professor|tecnologo|disciplina:|checkpoint.*docx|arquivo\s+"|arquivos baixados|link de detalhe)/i.test(value)
 }

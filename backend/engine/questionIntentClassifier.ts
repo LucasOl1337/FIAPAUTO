@@ -35,5 +35,25 @@ export function classifyQuestionIntent(question: string): QuestionIntent {
     }
   }
 
+  const normalized = normalizeQuestion(question)
+  const tokens = normalized.split(/\s+/).filter(Boolean)
+  if (
+    !normalized
+    || tokens.length <= 2
+    || /^(o amigao|amigao|baba|bobba|kkkk+|kk+|rs+|haha+|hehe+)$/.test(normalized)
+  ) {
+    return 'smalltalk_or_noise'
+  }
+
   return 'unknown'
+}
+
+function normalizeQuestion(value: string) {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
 }

@@ -6,7 +6,7 @@ import type {
   PublishedKnowledgeChunk,
   PublicSyncStatus,
 } from '@fiapauto/backend/contracts'
-import { askOllamaCloudTopic, isOllamaCloudConfigured } from './ollamaCloud.ts'
+import { resolvePublicApiBase } from '../publicApiBase.ts'
 import { answerPublishedTopicQuestion } from './publicAssistant.ts'
 
 const PUBLIC_API_BASE = resolvePublicApiBase()
@@ -86,33 +86,17 @@ export async function fetchPublicTopic(topicId: string) {
 }
 
 export async function askPublicTopic(input: { topicId: string; question: string }) {
-  if (isOllamaCloudConfigured()) {
-    const [topic, chunks] = await Promise.all([
-      fetchPublicTopic(input.topicId),
-      fetchStaticJson<PublishedKnowledgeChunk[]>('/knowledge/chunks.json', 'public_chat_failed'),
-    ])
-
-    return askOllamaCloudTopic({
-      topic,
-      chunks,
-      question: input.question,
-      buildAssetUrl: buildPublicAssetUrl,
-    })
-  }
-
   if (PUBLIC_API_BASE) {
-    try {
-      const response = await fetchPublicApiWithRetry('/api/public/chat/topic', {
-        method: 'POST',
-        headers: await buildPublicHeaders(),
-        body: JSON.stringify(input),
-      })
-      if (response.ok) {
-        return (await response.json()) as PublicTopicChatResult
-      }
-    } catch {
-      // Fall back to the static deterministic assistant below.
+    const response = await fetchPublicApiWithRetry('/api/public/chat/topic', {
+      method: 'POST',
+      headers: await buildPublicHeaders(),
+      body: JSON.stringify(input),
+    })
+    if (!response.ok) {
+      throw new Error('public_chat_failed')
     }
+
+    return (await response.json()) as PublicTopicChatResult
   }
 
   const [topic, chunks] = await Promise.all([
@@ -221,26 +205,4 @@ function isTransientPublicApiStatus(status: number) {
 
 function delay(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
-}
-
-function resolvePublicApiBase() {
-  const explicitCandidates = [
-    import.meta.env.VITE_PUBLIC_API_BASE_URL,
-    import.meta.env.VITE_API_BASE_URL,
-  ]
-    .map((value) => value?.trim() ?? '')
-    .filter(Boolean)
-
-  const explicitBase = explicitCandidates.find((value) => !shouldIgnoreExplicitApiBase(value))
-  return explicitBase ? explicitBase.replace(/\/+$/, '') : ''
-}
-
-function shouldIgnoreExplicitApiBase(value: string) {
-  try {
-    const hostname = new URL(value).hostname
-    const currentHostname = typeof window === 'undefined' ? '' : window.location.hostname
-    return /^(127\.0\.0\.1|localhost)$/i.test(hostname) && !/^(127\.0\.0\.1|localhost)$/i.test(currentHostname)
-  } catch {
-    return false
-  }
 }
