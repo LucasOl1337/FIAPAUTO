@@ -6,7 +6,7 @@ import type {
   PublishedKnowledgeChunk,
   PublicSyncStatus,
 } from '@fiapauto/backend/contracts'
-import { askOllamaCloudTopic } from './ollamaCloud.ts'
+import { askOllamaCloudTopic, isOllamaCloudConfigured } from './ollamaCloud.ts'
 import { answerPublishedTopicQuestion } from './publicAssistant.ts'
 
 const PUBLIC_API_BASE = resolvePublicApiBase()
@@ -86,6 +86,20 @@ export async function fetchPublicTopic(topicId: string) {
 }
 
 export async function askPublicTopic(input: { topicId: string; question: string }) {
+  if (isOllamaCloudConfigured()) {
+    const [topic, chunks] = await Promise.all([
+      fetchPublicTopic(input.topicId),
+      fetchStaticJson<PublishedKnowledgeChunk[]>('/knowledge/chunks.json', 'public_chat_failed'),
+    ])
+
+    return askOllamaCloudTopic({
+      topic,
+      chunks,
+      question: input.question,
+      buildAssetUrl: buildPublicAssetUrl,
+    })
+  }
+
   if (PUBLIC_API_BASE) {
     try {
       const response = await fetchPublicApiWithRetry('/api/public/chat/topic', {
@@ -105,17 +119,6 @@ export async function askPublicTopic(input: { topicId: string; question: string 
     fetchPublicTopic(input.topicId),
     fetchStaticJson<PublishedKnowledgeChunk[]>('/knowledge/chunks.json', 'public_chat_failed'),
   ])
-
-  try {
-    return await askOllamaCloudTopic({
-      topic,
-      chunks,
-      question: input.question,
-      buildAssetUrl: buildPublicAssetUrl,
-    })
-  } catch {
-    // Fall back to the local deterministic assistant below.
-  }
 
   return answerPublishedTopicQuestion({
     topic,

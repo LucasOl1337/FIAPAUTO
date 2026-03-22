@@ -352,7 +352,9 @@ export function useWorkspaceController(appMode: 'admin' | 'user') {
           preserveTopicAnswer: true,
         })
       }
-      if (result.qualityStatus === 'accepted' || result.qualityStatus === 'regenerated' || result.qualityStatus === 'fallback') {
+      if (result.providerUsed === 'ollama') {
+        setActivity(result.sections?.answerMode === 'general_guidance' ? 'Explicacao complementar pronta com IA.' : 'Resposta gerada com IA usando o contexto da materia.')
+      } else if (result.qualityStatus === 'accepted' || result.qualityStatus === 'regenerated' || result.qualityStatus === 'fallback') {
         setActivity(result.sections?.answerMode === 'general_guidance' ? 'Explicacao complementar pronta.' : 'Resposta baseada na materia pronta.')
       } else if (result.strategyUsed === 'memory') {
         setActivity('Resposta entregue pela memoria persistida do topico.')

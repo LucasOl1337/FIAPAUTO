@@ -26,9 +26,15 @@ type PublicCloudChatResponse = {
 type ParsedStructuredAnswer = {
   direct: string
   deliverables: string[]
-  deadline: string[]
   attention: string[]
   nextSteps: string[]
+  extra: string[]
+}
+
+type QualityEvaluation = {
+  accepted: boolean
+  reason: string
+  missingSections: string[]
 }
 
 export function isOllamaCloudConfigured() {
@@ -54,128 +60,115 @@ export async function askOllamaCloudTopic(input: {
   })) satisfies PublicChatResponse['citations']
   const encodedImages = await collectTopicImages(input.topic, input.buildAssetUrl)
 
-  const prompt = buildPrompt({
+  const primaryAnswer = await requestOllamaChat({
+    prompt: buildPrompt({
+      topic: input.topic,
+      question: input.question,
+      rankedChunks,
+    }),
+    encodedImages,
+  })
+
+  const primaryEvaluation = evaluateAnswerQuality({
+    question: input.question,
+    parsed: parseStructuredAnswer(primaryAnswer),
+  })
+
+  if (primaryEvaluation.accepted) {
+    return buildCloudPayload({
+      topic: input.topic,
+      question: input.question,
+      citations,
+      rawAnswer: primaryAnswer,
+      qualityStatus: 'accepted',
+      qualityReason: primaryEvaluation.reason,
+      answeredByPass: 'primary',
+      missingSections: primaryEvaluation.missingSections,
+    })
+  }
+
+  const retryAnswer = await requestOllamaChat({
+    prompt: buildRetryPrompt({
+      topic: input.topic,
+      question: input.question,
+      previousAnswer: primaryAnswer,
+      qualityReason: primaryEvaluation.reason,
+      missingSections: primaryEvaluation.missingSections,
+      rankedChunks,
+    }),
+    encodedImages,
+  })
+
+  const retryEvaluation = evaluateAnswerQuality({
+    question: input.question,
+    parsed: parseStructuredAnswer(retryAnswer),
+  })
+
+  return buildCloudPayload({
     topic: input.topic,
     question: input.question,
-    rankedChunks,
+    citations,
+    rawAnswer: retryAnswer,
+    qualityStatus: retryEvaluation.accepted ? 'regenerated' : 'fallback',
+    qualityReason: retryEvaluation.reason,
+    answeredByPass: 'retry',
+    missingSections: retryEvaluation.missingSections,
   })
+}
 
-  const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${OLLAMA_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: OLLAMA_MODEL,
-      stream: false,
-      options: {
-        temperature: 0.2,
-      },
-      messages: [
-        {
-          role: 'user',
-          content: prompt,
-          ...(encodedImages.length > 0 ? { images: encodedImages } : {}),
-        },
-      ],
-    }),
-  })
-
-  const data = (await response.json().catch(() => null)) as
-    | {
-        message?: {
-          content?: string
-        }
-        error?: string
-      }
-    | null
-
-  if (!response.ok) {
-    throw new Error(data?.error || `ollama_cloud_http_${response.status}`)
-  }
-
-  const answer = data?.message?.content?.trim()
-  if (!answer) {
-    throw new Error('ollama_cloud_empty_response')
-  }
-
-  const primaryEvaluation = evaluateAnswerQuality(input.question, parseStructuredAnswer(answer))
-  if (!primaryEvaluation.accepted) {
-    const retryAnswer = await requestOllamaChat({
-      prompt: buildRetryPrompt({
-        topic: input.topic,
-        question: input.question,
-        previousAnswer: answer,
-        qualityReason: primaryEvaluation.reason,
-        missingSections: primaryEvaluation.missingSections,
-        rankedChunks,
-      }),
-      encodedImages,
-    })
-    const retryEvaluation = evaluateAnswerQuality(input.question, parseStructuredAnswer(retryAnswer))
-    if (retryEvaluation.accepted) {
-      return {
-        topicId: input.topic.id,
-        answer: normalizeStructuredAnswer(retryAnswer),
-        sections: buildSections(input.topic, retryAnswer),
-        confidence: citations.length >= 2 ? 'high' : citations.length === 1 ? 'medium' : 'low',
-        strategyUsed: 'rag_llm',
-        providerUsed: 'ollama',
-        fallbackLevel: 0,
-        citations,
-        suggestedQuestions: buildSuggestedQuestions(input.topic),
-        nextSteps: parseStructuredAnswer(retryAnswer).nextSteps.slice(0, 3),
-        answeredAt: new Date().toISOString(),
-        qualityStatus: 'regenerated',
-        qualityReason: retryEvaluation.reason,
-        answeredByPass: 'retry',
-        missingSections: retryEvaluation.missingSections,
-      } satisfies PublicCloudChatResponse
-    }
-
-    throw new Error('ollama_cloud_quality_failed')
-  }
+function buildCloudPayload(input: {
+  topic: PublicTopic
+  question: string
+  citations: PublicChatResponse['citations']
+  rawAnswer: string
+  qualityStatus: PublicCloudChatResponse['qualityStatus']
+  qualityReason: string
+  answeredByPass: PublicCloudChatResponse['answeredByPass']
+  missingSections: string[]
+}): PublicCloudChatResponse {
+  const parsed = parseStructuredAnswer(input.rawAnswer)
+  const sections = buildSections(input.topic, input.question, parsed)
 
   return {
     topicId: input.topic.id,
-    answer: normalizeStructuredAnswer(answer),
-    sections: buildSections(input.topic, answer),
-    confidence: citations.length >= 2 ? 'high' : citations.length === 1 ? 'medium' : 'low',
+    answer: normalizeStructuredAnswer(parsed, sections),
+    sections,
+    confidence: input.citations.length >= 2 ? 'high' : input.citations.length === 1 ? 'medium' : 'low',
     strategyUsed: 'rag_llm',
     providerUsed: 'ollama',
-    fallbackLevel: 0,
-    citations,
-    suggestedQuestions: buildSuggestedQuestions(input.topic),
-    nextSteps: parseStructuredAnswer(answer).nextSteps.slice(0, 3),
+    fallbackLevel: input.qualityStatus === 'fallback' ? 1 : 0,
+    citations: input.citations,
+    suggestedQuestions: sections.followUpQuestions,
+    nextSteps: sections.nextSteps,
     answeredAt: new Date().toISOString(),
-    qualityStatus: 'accepted',
-    qualityReason: primaryEvaluation.reason,
-    answeredByPass: 'primary',
-    missingSections: primaryEvaluation.missingSections,
-} satisfies PublicCloudChatResponse
+    qualityStatus: input.qualityStatus,
+    qualityReason: input.qualityReason,
+    answeredByPass: input.answeredByPass,
+    missingSections: input.missingSections,
+  }
 }
 
-function buildSections(topic: PublicTopic, answer: string): PublicChatResponse['sections'] {
-  const parsed = parseStructuredAnswer(answer)
-  const fullAnswer = [
+function buildSections(
+  topic: PublicTopic,
+  question: string,
+  parsed: ParsedStructuredAnswer,
+): PublicChatResponse['sections'] {
+  const deliverables = buildDeliverableItems(parsed.deliverables, topic)
+  const attentionPoints = buildAttentionItems(parsed.attention, topic)
+  const nextSteps = buildNextSteps(parsed.nextSteps, topic, question)
+  const fullAnswer = dedupeItems([
     parsed.direct,
-    ...parsed.attention,
-    ...parsed.nextSteps,
-  ]
-    .map((item) => sanitizeAnswerText(item))
-    .filter(Boolean)
-    .filter((item, index, array) => array.findIndex((candidate) => candidate.toLowerCase() === item.toLowerCase()) === index)
-    .slice(0, 4)
+    ...parsed.extra,
+  ]).slice(0, 3)
 
   return {
-    summary10s: parsed.direct || `Resumo rapido de ${topic.title}.`,
-    fullAnswer: fullAnswer.length > 0 ? fullAnswer : [`Veja os proximos passos de ${topic.title} e execute a primeira acao pratica.`],
-    deliverables: parsed.deliverables.filter((item) => !/\bprazo\b/i.test(item)).slice(0, 3),
-    attentionPoints: parsed.attention.slice(0, 3),
-    nextSteps: parsed.nextSteps.slice(0, 3),
-    followUpQuestions: buildSuggestedQuestions(topic).filter((item) => !/\bprazo\b/i.test(item)).slice(0, 3),
-    answerMode: 'grounded',
+    summary10s: buildSummary10s(topic, question, parsed.direct, deliverables),
+    fullAnswer: fullAnswer.length > 0 ? fullAnswer : [`Foque no objetivo principal de ${topic.title} e siga o primeiro passo pratico confirmado no material.`],
+    deliverables,
+    attentionPoints,
+    nextSteps,
+    followUpQuestions: buildSuggestedQuestions(topic, question),
+    answerMode: shouldUseGeneralGuidance(question, parsed, deliverables) ? 'general_guidance' : 'grounded',
   }
 }
 
@@ -190,7 +183,7 @@ async function requestOllamaChat(input: { prompt: string; encodedImages: string[
       model: OLLAMA_MODEL,
       stream: false,
       options: {
-        temperature: 0.2,
+        temperature: 0.15,
       },
       messages: [
         {
@@ -268,56 +261,66 @@ function buildPrompt(input: {
     .join('\n')
   const quickTips = (normalizedLearning?.quickTips ?? []).slice(0, 4).map((item) => `- ${item}`).join('\n')
   const keyFacts = (input.topic.agentMemory?.keyFacts ?? []).slice(0, 8).map((item) => `- ${item}`).join('\n')
+  const knownDeliverables = (input.topic.agentMemory?.deliverables ?? []).slice(0, 4).map((item) => `- ${item}`).join('\n')
   const chunksBlock = input.rankedChunks.map((chunk, index) => `[${index + 1}] ${chunk.sourceType}: ${chunk.text}`).join('\n\n')
 
   return [
-    'Voce e o assistente publico do FIAPAUTO.',
-    'Responda em portugues do Brasil, de forma objetiva, clara e util para um aluno.',
-    'Evite resposta genérica, cumprimentos longos e texto corrido sem estrutura.',
-    'Use apenas o contexto fornecido abaixo. Se algo nao estiver no material, diga explicitamente que nao encontrou.',
-    'Se a pergunta for vaga, curta ou for apenas uma saudacao, responda com o resumo mais util da materia em vez de apenas cumprimentar.',
+    'Voce e o assistente publico do FiapFlow.',
+    'Responda em portugues do Brasil, de forma objetiva, clara, curta e util para um aluno.',
+    'Use apenas o contexto fornecido abaixo.',
+    'Nunca escreva "nao sei", "nao encontrei isso no material" ou placeholders vazios.',
+    'Se faltar um detalhe exato, entregue a melhor orientacao pratica possivel com base no contexto confirmado.',
+    'Nunca copie nomes brutos de arquivo, professor, disciplina, semestre ou metadados como se fossem entregaveis.',
+    'Nao mencione prazo, data ou horario, a menos que o usuario pergunte isso diretamente.',
+    'Nao repita a mesma regra em mais de um bloco.',
+    'Se a pergunta fugir da materia, explique de forma geral em 1 ou 2 frases e reconecte com a tarefa atual.',
+    'Se a pergunta for muito vaga, peca uma reformulacao curta e sugira o proximo melhor tipo de pergunta.',
     '',
     `Materia: ${input.topic.title}`,
     `Curso: ${input.topic.course}`,
     `Modulo: ${input.topic.moduleKey}`,
-    `Status: ${input.topic.status}`,
     '',
     'Resumo publicado:',
-    input.topic.summary || 'Nao existe resumo publicado.',
+    input.topic.summary || 'Resumo nao publicado.',
     '',
     'Memoria do agente:',
-    input.topic.agentMemory?.overview || 'Nao existe memoria publicada.',
+    input.topic.agentMemory?.overview || 'Memoria nao publicada.',
     '',
-    'Fatos rapidos:',
-    keyFacts || '- Nenhum fato rapido publicado.',
+    'Entregaveis confirmados:',
+    knownDeliverables || '- Nenhum entregavel confirmado.',
+    '',
+    'Fatos importantes:',
+    keyFacts || '- Nenhum fato importante confirmado.',
     '',
     'FAQ / aprendizado:',
-    frequentQuestions || '- Nenhum FAQ publicado.',
+    frequentQuestions || '- Nenhum FAQ confirmado.',
     '',
-    'Pontos principais para aprender:',
-    learningTopics || '- Nenhum topico didatico publicado.',
+    'Topicos de aprendizado:',
+    learningTopics || '- Nenhum topico de aprendizado confirmado.',
     '',
     'Dicas rapidas:',
-    quickTips || '- Nenhuma dica publicada.',
+    quickTips || '- Nenhuma dica rapida confirmada.',
     '',
     'Trechos relevantes do material:',
-    chunksBlock || 'Nenhum chunk encontrado para esta pergunta.',
+    chunksBlock || 'Nenhum trecho relevante encontrado.',
     '',
     `Pergunta do usuario: ${input.question}`,
     '',
-    'Formato da resposta:',
-    '- Use exatamente estes blocos, nesta ordem:',
+    'Formato obrigatorio da resposta:',
     'RESPOSTA DIRETA:',
     'O QUE ENTREGAR:',
-    'PRAZO:',
     'ATENCAO:',
     'PROXIMO PASSO:',
-    '- Em cada bloco, seja curto e concreto.',
-    '- Se um bloco nao tiver informacao confirmada, diga "Nao encontrei isso no material".',
+    '',
+    'Regras do formato:',
+    '- Cada bloco deve conter algo util, humano e pronto para aparecer em cards.',
+    '- RESPOSTA DIRETA: responda a duvida principal em 1 ou 2 frases curtas.',
+    '- O QUE ENTREGAR: liste apenas itens curtos e limpos.',
+    '- ATENCAO: liste riscos curtos, um por linha, sem repetir o que ja apareceu.',
+    '- PROXIMO PASSO: liste acoes executaveis e objetivas.',
     '- Nao use markdown, tabela, pipe, asterisco, titulo com #, bloco de citacao ou texto decorativo.',
-    '- Use frases simples e bullets normais apenas quando precisar listar algo.',
     '- Nao invente dados.',
-    '- Se as imagens anexadas ajudarem, use-as tambem.',
+    '- Se as imagens ajudarem, use-as tambem.',
   ].join('\n')
 }
 
@@ -335,20 +338,30 @@ function buildRetryPrompt(input: {
     'Sua resposta anterior ficou insuficiente.',
     `Motivo da rejeicao: ${input.qualityReason}`,
     `Blocos faltando ou fracos: ${input.missingSections.join(', ') || 'RESPOSTA DIRETA'}`,
+    'Agora corrija com estas exigencias extras:',
     '- Responda primeiro a pergunta real do usuario.',
-    '- Se a pergunta for pratica, entregue orientacao executavel.',
-    '- Nao devolva so "nao encontrei" sem orientar o que fazer agora.',
-    '- Mantenha os mesmos blocos obrigatorios.',
+    '- Remova redundancias.',
+    '- Remova qualquer nome bruto de arquivo e qualquer metadado irrelevante.',
+    '- Nao devolva texto generico como "para avancar" sem explicar a duvida real.',
+    '- Nao corte a resposta com reticencias nem compacte tudo em uma frase gigante.',
     '',
     'Resposta anterior ruim:',
     input.previousAnswer,
   ].join('\n')
 }
 
-function buildSuggestedQuestions(topic: PublicTopic) {
+function buildSuggestedQuestions(topic: PublicTopic, question: string) {
+  if (/\b(entregar|arquivo|anexo|enviar)\b/i.test(question)) {
+    return ['Me faca um checklist', 'Explique este trabalho de forma simples', 'O que pode me fazer perder pontos?']
+  }
+
+  if (/\b(checklist|passo|como comeco)\b/i.test(question)) {
+    return ['O que preciso entregar?', 'Explique este trabalho de forma simples', 'O que pode me fazer perder pontos?']
+  }
+
   return [
     `O que preciso entregar em ${topic.title}?`,
-    'Me faca um checklist do que preciso fazer agora.',
+    'Me faca um checklist',
     'O que pode me fazer perder pontos?',
   ]
 }
@@ -362,9 +375,9 @@ function parseStructuredAnswer(answer: string): ParsedStructuredAnswer {
   const parsed: ParsedStructuredAnswer = {
     direct: '',
     deliverables: [],
-    deadline: [],
     attention: [],
     nextSteps: [],
+    extra: [],
   }
 
   let currentSection: keyof ParsedStructuredAnswer | null = null
@@ -391,20 +404,24 @@ function parseStructuredAnswer(answer: string): ParsedStructuredAnswer {
 
     if (currentSection) {
       pushAnswerValue(parsed, currentSection, line)
+      continue
+    }
+
+    const looseLine = sanitizeAnswerText(line)
+    if (looseLine) {
+      parsed.extra.push(looseLine)
     }
   }
 
   return parsed
 }
 
-function normalizeStructuredAnswer(answer: string) {
-  const parsed = parseStructuredAnswer(answer)
+function normalizeStructuredAnswer(parsed: ParsedStructuredAnswer, sections: PublicChatResponse['sections']) {
   return [
-    `RESPOSTA DIRETA: ${parsed.direct || 'Nao encontrei isso no material'}`,
-    `O QUE ENTREGAR: ${formatSectionItems(parsed.deliverables)}`,
-    `PRAZO: ${formatSectionItems(parsed.deadline)}`,
-    `ATENCAO: ${formatSectionItems(parsed.attention)}`,
-    `PROXIMO PASSO: ${formatSectionItems(parsed.nextSteps)}`,
+    `RESPOSTA DIRETA: ${sanitizeAnswerText(parsed.direct) || sections.summary10s}`,
+    `O QUE ENTREGAR: ${formatSectionItems(sections.deliverables, 'Confirme os entregaveis no anexo principal.')}`,
+    `ATENCAO: ${formatSectionItems(sections.attentionPoints, 'Valide os criterios finais no material principal antes de enviar.')}`,
+    `PROXIMO PASSO: ${formatSectionItems(sections.nextSteps, 'Abra o anexo principal e monte uma checklist curta antes de continuar.')}`,
   ].join('\n')
 }
 
@@ -412,7 +429,6 @@ function normalizeSection(value: string): keyof ParsedStructuredAnswer | null {
   const normalized = normalize(value)
   if (/^resposta direta|^resumo/.test(normalized)) return 'direct'
   if (/^o que entregar|^entrega|^entreg/.test(normalized)) return 'deliverables'
-  if (/^prazo|^data/.test(normalized)) return 'deadline'
   if (/^atencao|^risco/.test(normalized)) return 'attention'
   if (/^proximo passo|^proximos passos|^checklist|^como fazer/.test(normalized)) return 'nextSteps'
   return null
@@ -440,54 +456,199 @@ function sanitizeAnswerText(value: string) {
     .replace(/__(.+?)__/g, '$1')
     .replace(/`(.+?)`/g, '$1')
     .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/^[-*]\s*/g, '')
+    .replace(/^arquivo:\s*/i, '')
+    .replace(/^pontos?\s+de\s+atencao:\s*/i, '')
+    .replace(/^atencao:\s*/i, '')
+    .replace(/^proximo\s+passo:\s*/i, '')
+    .replace(/^o\s+que\s+entregar:\s*/i, '')
     .replace(/\s+/g, ' ')
     .trim()
 }
 
-function formatSectionItems(items: string[]) {
-  const visible = items.map((item) => sanitizeAnswerText(item)).filter(Boolean)
+function evaluateAnswerQuality(input: { question: string; parsed: ParsedStructuredAnswer }): QualityEvaluation {
+  const missingSections: string[] = []
+  const normalizedQuestion = normalize(input.question)
+  const direct = sanitizeAnswerText(input.parsed.direct)
+
+  if (!direct || direct.length < 20) {
+    missingSections.push('RESPOSTA DIRETA')
+  }
+
+  if (containsForbiddenPlaceholder(direct) || containsRawFileNoise(direct)) {
+    missingSections.push('RESPOSTA DIRETA')
+  }
+
+  if (/\b(entregar|arquivo|anexo|enviar)\b/.test(normalizedQuestion) && buildDeliverableItems(input.parsed.deliverables, null).length === 0) {
+    missingSections.push('O QUE ENTREGAR')
+  }
+
+  if (/\b(checklist|passo|como|explica|ajuda)\b/.test(normalizedQuestion) && buildNextSteps(input.parsed.nextSteps, null, input.question).length === 0) {
+    missingSections.push('PROXIMO PASSO')
+  }
+
+  if (buildAttentionItems(input.parsed.attention, null).some((item) => containsRawFileNoise(item))) {
+    missingSections.push('ATENCAO')
+  }
+
+  return {
+    accepted: missingSections.length === 0,
+    reason: missingSections.length === 0 ? 'Resposta validada pela IA.' : `Resposta fraca ou ruidosa; revisar ${Array.from(new Set(missingSections)).join(', ')}.`,
+    missingSections: Array.from(new Set(missingSections)),
+  }
+}
+
+function buildSummary10s(topic: PublicTopic, question: string, direct: string, deliverables: string[]) {
+  const cleanedDirect = sanitizeAnswerText(direct)
+  if (cleanedDirect && cleanedDirect.length <= 180 && !containsRawFileNoise(cleanedDirect)) {
+    return cleanedDirect
+  }
+
+  if (/\b(entregar|arquivo|anexo|enviar)\b/i.test(question) && deliverables.length > 0) {
+    return `Foque nestes entregaveis principais: ${deliverables.join(', ')}.`
+  }
+
+  return `Foque no objetivo principal de ${topic.title} e siga o primeiro passo pratico confirmado no material.`
+}
+
+function buildDeliverableItems(items: string[], topic: PublicTopic | null) {
+  const values = dedupeItems([
+    ...items,
+    ...((topic?.agentMemory?.deliverables ?? [])),
+  ])
+    .map(normalizeDeliverableItem)
+    .filter(isUsefulDeliverable)
+
+  return dedupeItems(values).slice(0, 3)
+}
+
+function buildAttentionItems(items: string[], topic: PublicTopic | null) {
+  const values = dedupeItems([
+    ...splitCompositeItems(items),
+    ...((topic?.agentMemory?.keyFacts ?? []).filter((item) => /atras|atenc|maximo|abnt|dados ficticios|oral|nota zero|cancel/i.test(normalize(item)))),
+  ])
+    .map(normalizeAttentionItem)
+    .filter(isUsefulAttention)
+
+  return values.slice(0, 3)
+}
+
+function buildNextSteps(items: string[], topic: PublicTopic | null, question: string) {
+  const values = dedupeItems([
+    ...splitCompositeItems(items).filter((item) => /\b(abra|monte|prepare|valide|revise|confirme|organize|liste|verifique)\b/i.test(item)),
+    ...buildFallbackNextSteps(topic, question),
+  ])
+
+  return values.slice(0, 3)
+}
+
+function buildFallbackNextSteps(topic: PublicTopic | null, question: string) {
+  if (question.trim().length <= 4) {
+    return [
+      'Reescreva sua pergunta de forma objetiva sobre entrega, checklist ou criterio de avaliacao.',
+      'Se quiser, pergunte o que precisa entregar ou o que pode fazer voce perder pontos.',
+    ]
+  }
+
+  return [
+    'Abra o anexo principal para confirmar os detalhes finais.',
+    'Monte uma checklist curta do que precisa ser enviado.',
+    ...(topic ? [`Revise o objetivo central de ${topic.title} antes de finalizar.`] : []),
+  ]
+}
+
+function formatSectionItems(items: string[], fallback: string) {
+  const visible = dedupeItems(items)
   if (visible.length === 0) {
-    return 'Nao encontrei isso no material'
+    return fallback
   }
 
   return visible.slice(0, 3).map((item) => `- ${item}`).join(' ')
 }
 
-function evaluateAnswerQuality(question: string, parsed: ParsedStructuredAnswer) {
-  const normalizedQuestion = normalize(question)
-  const combined = normalize([parsed.direct, ...parsed.deliverables, ...parsed.deadline, ...parsed.attention, ...parsed.nextSteps].join(' '))
-  const missingSections: string[] = []
+function splitCompositeItems(items: string[]) {
+  return items.flatMap((item) =>
+    sanitizeAnswerText(item)
+      .split(/\s*;\s*|\.\s+(?=[A-Z0-9])/)
+      .map((part) => sanitizeAnswerText(part))
+      .filter(Boolean),
+  )
+}
 
-  if (!parsed.direct || parsed.direct.length < 24 || /^nao encontrei isso no material$/i.test(parsed.direct)) {
-    missingSections.push('RESPOSTA DIRETA')
+function normalizeDeliverableItem(value: string) {
+  const cleaned = sanitizeAnswerText(value)
+    .replace(/\.(pdf|docx|xlsx|xls)$/i, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (/(apresenta|slide)/i.test(cleaned) && /pdf/i.test(value)) return 'Apresentacao em PDF'
+  if (/(formular|questionario|pesquisa)/i.test(cleaned) && /pdf/i.test(value)) return 'Formulario ou pesquisa em PDF'
+  if (/(base de dados|planilha|excel|xlsx)/i.test(cleaned)) return 'Base de dados em Excel'
+
+  return cleaned
+}
+
+function normalizeAttentionItem(value: string) {
+  return sanitizeAnswerText(value)
+    .replace(/^seguir\s+/i, '')
+    .replace(/^pontos?\s+de\s+atencao:\s*/i, '')
+}
+
+function isUsefulDeliverable(value: string) {
+  const cleaned = sanitizeAnswerText(value)
+  if (!cleaned || cleaned.length > 72) {
+    return false
   }
 
-  if (/\bpython\b|\bcodigo\b|\bscript\b/.test(normalizedQuestion)) {
-    if (!/\bpython\b|\bcodigo\b|\bscript\b/.test(combined)) {
-      missingSections.push('RESPOSTA DIRETA')
+  return !containsRawFileNoise(cleaned)
+}
+
+function isUsefulAttention(value: string) {
+  const cleaned = sanitizeAnswerText(value)
+  if (!cleaned || cleaned.length > 120) {
+    return false
+  }
+
+  return !containsRawFileNoise(cleaned)
+}
+
+function containsForbiddenPlaceholder(value: string) {
+  return /\bnao sei\b|\bnao encontrei isso no material\b/i.test(value)
+}
+
+function containsRawFileNoise(value: string) {
+  return /(checkpoint.*docx|arquivo "|disciplina|professor|semestre|1tiapf|tecnologo|statistical computing|rodolfo|curso|modulo)/i.test(value)
+}
+
+function shouldUseGeneralGuidance(question: string, parsed: ParsedStructuredAnswer, deliverables: string[]) {
+  return question.trim().length <= 4 || (!deliverables.length && /\b(ensina|explica|como funciona)\b/i.test(question) && parsed.direct.length > 0)
+}
+
+function dedupeItems(values: string[]) {
+  const seen = new Set<string>()
+  const items: string[] = []
+
+  for (const value of values) {
+    const cleaned = sanitizeAnswerText(value)
+    if (!cleaned) {
+      continue
     }
-    if (!parsed.nextSteps.some((item) => /\b(abra|prepare|confirme|foco|ignore|use|revise|valide)\b/i.test(item))) {
-      missingSections.push('PROXIMO PASSO')
+
+    const key = normalize(cleaned)
+      .replace(/\batraso superior a 15 minutos cancela entrega\b/g, 'atraso-15')
+      .replace(/\bmaximo 6 por grupo\b/g, 'maximo-6')
+      .replace(/\bsem dados ficticios\b/g, 'sem-dados-ficticios')
+      .replace(/\bausencia na oral gera nota zero\b/g, 'oral-nota-zero')
+    if (seen.has(key)) {
+      continue
     }
+
+    seen.add(key)
+    items.push(cleaned)
   }
 
-  if (/\b(prazo|deadline|data|vence)\b/.test(normalizedQuestion) && parsed.deadline.length === 0) {
-    missingSections.push('PRAZO')
-  }
-
-  if (/\b(entregar|entrega|arquivo|anexo)\b/.test(normalizedQuestion) && parsed.deliverables.length === 0) {
-    missingSections.push('O QUE ENTREGAR')
-  }
-
-  if (/\b(checklist|dica|como|nao entendi|ajuda)\b/.test(normalizedQuestion) && parsed.nextSteps.length === 0) {
-    missingSections.push('PROXIMO PASSO')
-  }
-
-  return {
-    accepted: missingSections.length === 0,
-    reason: missingSections.length === 0 ? 'Resposta validada pela IA.' : `Resposta fraca; faltou ${missingSections.join(', ')}.`,
-    missingSections: Array.from(new Set(missingSections)),
-  }
+  return items
 }
 
 function rankChunks(chunks: PublishedKnowledgeChunk[], question: string) {
@@ -498,8 +659,8 @@ function rankChunks(chunks: PublishedKnowledgeChunk[], question: string) {
       chunk,
       score: tokens.reduce((total, token) => {
         let nextTotal = total
-        if (chunk.text.toLowerCase().includes(token)) nextTotal += 1
-        if (chunk.keywords.includes(token)) nextTotal += 2
+        if (normalize(chunk.text).includes(token)) nextTotal += 1
+        if (chunk.keywords.map((item) => normalize(item)).includes(token)) nextTotal += 2
         return nextTotal
       }, chunk.sourceType === 'faq' ? 1 : 0),
     }))
