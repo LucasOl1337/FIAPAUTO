@@ -67,10 +67,10 @@ export function UserAuthGate({ children }: UserAuthGateProps) {
     <main className="simple-app">
       <section className="hero-card">
         <p className="eyebrow">FiapFlow</p>
-        <h1>{mode === 'sign_up' ? 'Criar conta no portal do aluno' : 'Entrar no portal do aluno'}</h1>
+        <h1>{mode === 'sign_up' ? 'Criar conta no Assistente de Estudos' : 'Entrar no Assistente de Estudos'}</h1>
         <p className="hero-text">
           {mode === 'sign_up'
-            ? 'Crie sua conta com email e senha para acessar o portal.'
+            ? 'Crie sua conta com email e senha para acessar o assistente.'
             : 'Use seu email e senha, ou entre como visitante.'}
         </p>
         <div className="admin-gate">
