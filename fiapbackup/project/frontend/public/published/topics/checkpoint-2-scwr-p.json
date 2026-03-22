@@ -1,0 +1,80 @@
+{
+  "id": "checkpoint-2-scwr-p",
+  "title": "Checkpoint 2: SCWR&P",
+  "course": "1TIAPF-2026",
+  "moduleKey": "ia-aplicada",
+  "status": "upcoming",
+  "dueText": "Prazo de entrega às 23:59",
+  "summary": "Objetivo: Checkpoint 2: SCWR&P.\nEntregaveis: Arquivo \"Checkpoint 2.docx.pdf\"; Titulo: Checkpoint 2: SCWR&P\nPontos de atencao: consulte os anexos e a screenshot da atividade para confirmar os detalhes.\nCurso: 1TIAPF-2026",
+  "summaryGeneratedAt": "2026-03-22T11:24:18.271Z",
+  "agentMemory": {
+    "overview": "Objetivo: Checkpoint 2: SCWR&P.\nEntregaveis: Arquivo \"Checkpoint 2.docx.pdf\"; Titulo: Checkpoint 2: SCWR&P\nPrazo: Data nao identificada no material.\nPontos de atencao: consulte os anexos e a screenshot da atividade para confirmar os detalhes.\nCurso: 1TIAPF-2026",
+    "deliverables": [
+      "Arquivo \"Checkpoint 2.docx.pdf\"",
+      "Titulo: Checkpoint 2: SCWR&P\nCurso: 1TIAPF-2026\nStatus: upcoming\nPrazo: Prazo de entrega às 23:59\nLink de detalhe: https://teams.microsoft.com/v2/\nModulo sugerido: ia-aplicada\nArquivos baixados: Checkpoint 2.docx.pdf"
+    ],
+    "deadlines": [
+      "Prazo de entrega às 23:59",
+      "Titulo: Checkpoint 2: SCWR&P\nCurso: 1TIAPF-2026\nStatus: upcoming\nPrazo: Prazo de entrega às 23:59\nLink de detalhe: https://teams.microsoft.com/v2/\nModulo sugerido: ia-aplicada\nArquivos baixados: Checkpoint 2.docx.pdf"
+    ],
+    "faq": [],
+    "keyFacts": [
+      "Objetivo: Checkpoint 2: SCWR&P.",
+      "Entregaveis: Arquivo \"Checkpoint 2.docx.pdf\"; Titulo: Checkpoint 2: SCWR&P",
+      "Prazo: Data nao identificada no material.",
+      "Pontos de atencao: consulte os anexos e a screenshot da atividade para confirmar os detalhes.",
+      "Curso: 1TIAPF-2026"
+    ],
+    "answerStyle": "Responder de forma objetiva, curta e sempre dizer quando algo nao foi encontrado.",
+    "fallbackPolicy": "Se a pergunta fugir do material persistido, consultar o LLM e salvar a resposta na memoria.",
+    "sourceSnippets": [
+      "Titulo: Checkpoint 2: SCWR&P\nCurso: 1TIAPF-2026\nStatus: upcoming\nPrazo: Prazo de entrega às 23:59\nLink de detalhe: https://teams.microsoft.com/v2/\nModulo sugerido: ia-aplicada\nArquivos baixados: Checkpoint 2.docx.pdf",
+      "Avisos de ingestao: upload_failed:Checkpoint 2.docx.pdf:404"
+    ]
+  },
+  "learning": {
+    "frequentQuestions": [
+      {
+        "question": "O que preciso entregar?",
+        "answer": "Os entregaveis nao ficaram totalmente claros no material, entao vale abrir o anexo principal para confirmar."
+      }
+    ],
+    "learningTopics": [
+      {
+        "title": "Entenda o objetivo central",
+        "explanation": "Leia o enunciado de Checkpoint 2: SCWR&P pensando no resultado final que a atividade quer avaliar.",
+        "commonDifficulty": "Muita gente tenta começar pelo arquivo sem antes entender o que precisa demonstrar na atividade.",
+        "studyStrategy": "Resuma em uma frase o objetivo do trabalho e depois confira onde cada parte aparece no enunciado."
+      },
+      {
+        "title": "Separe o que precisa ser entregue",
+        "explanation": "Antes de produzir qualquer coisa, marque no enunciado quais arquivos, formatos e evidencias precisam ser enviados.",
+        "commonDifficulty": "Um erro comum e deixar para descobrir o formato ou o arquivo final so no fim da execucao.",
+        "studyStrategy": "Monte uma checklist curta com arquivos, formato e local de envio antes de executar o trabalho."
+      },
+      {
+        "title": "Evite retrabalho e perda de pontos",
+        "explanation": "Os pontos de atencao principais aqui sao: confira nome completo e matricula em todos os entregaveis.",
+        "commonDifficulty": "A parte que mais confunde costuma ser esquecer regra de submissao, formato ou requisito individual do grupo.",
+        "studyStrategy": "Reserve a revisao final para conferir nomes, formato e regras da entrega."
+      }
+    ],
+    "quickTips": [
+      "confira nome completo e matricula em todos os entregaveis"
+    ]
+  },
+  "attachments": [
+    {
+      "path": "assets/attachments/checkpoint-2-scwr-p/checkpoint-2-docx-36174dcf8d.pdf",
+      "key": "assets/attachments/checkpoint-2-scwr-p/checkpoint-2-docx-36174dcf8d.pdf",
+      "name": "Checkpoint 2.docx.pdf",
+      "contentType": "application/pdf",
+      "size": 148066
+    }
+  ],
+  "screenshots": [
+    "assets/screenshots/checkpoint-2-scwr-p/checkpoint-2-scwr-p-list-0aad0173b5.png",
+    "assets/screenshots/checkpoint-2-scwr-p/checkpoint-2-scwr-p-detail-19fa078aa1.png"
+  ],
+  "updatedAt": "2026-03-22T17:00:59.772Z"
+}

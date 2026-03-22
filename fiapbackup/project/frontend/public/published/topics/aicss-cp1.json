@@ -1,0 +1,77 @@
+{
+  "id": "aicss-cp1",
+  "title": "AICSS - CP1",
+  "course": "1TIAPF-2026",
+  "moduleKey": "ia-aplicada",
+  "status": "upcoming",
+  "dueText": "Prazo de entrega às 23:59",
+  "summary": "Objetivo: AICSS - CP1.\nEntregaveis: Arquivo \"AICSS (CP 1) e Cognitive DataScience (CP 1).pdf\"; Arquivo: AICSS (CP 1) e Cognitive DataScience (CP 1).pdf\nPontos de atencao: consulte os anexos e a screenshot da atividade para confirmar os detalhes.\nCurso: 1TIAPF-2026. Status: upcoming.",
+  "summaryGeneratedAt": "2026-03-21T14:58:38.312Z",
+  "agentMemory": {
+    "overview": "Objetivo: AICSS - CP1.\nEntregaveis: Arquivo \"AICSS (CP 1) e Cognitive DataScience (CP 1).pdf\"; Arquivo: AICSS (CP 1) e Cognitive DataScience (CP 1).pdf\nAICSS (CP1) + Cognitive Data Science (CP1)\nTecnólogo em IA\nDados da entrega\nData: 13/03/2026\nEntrega no Teams da respectiva disciplina\nTema\nO problema do cotonifício Nonamed – registro de operação\nO cotonifício Nonamed possui 2 máquinas de processamento de algodã\nPrazo: Prazo de entrega às 23:59\nCurso: 1TIAPF-2026. Status: upcoming.\nPontos de atencao: consulte os anexos e a screenshot da atividade para confirmar os detalhes.",
+    "deliverables": [
+      "Arquivo \"AICSS (CP 1) e Cognitive DataScience (CP 1).pdf\"",
+      "Arquivo: AICSS (CP 1) e Cognitive DataScience (CP 1).pdf\nAICSS (CP1) + Cognitive Data Science (CP1)\nTecnólogo em IA\nDados da entrega\nData: 13/03/2026\nEntrega no Teams da respectiva disciplina\nTema\nO problema do cotonifício Nonamed – registro de operação\nO cotonifício Nonamed possui 2 máquinas de processamento de algodã"
+    ],
+    "deadlines": [
+      "Prazo de entrega às 23:59",
+      "Arquivo: AICSS (CP 1) e Cognitive DataScience (CP 1).pdf\nAICSS (CP1) + Cognitive Data Science (CP1)\nTecnólogo em IA\nDados da entrega\nData: 13/03/2026\nEntrega no Teams da respectiva disciplina\nTema\nO problema do cotonifício Nonamed – registro de operação\nO cotonifício Nonamed possui 2 máquinas de processamento de algodã",
+      "Disciplina: AI Computer Systems and Sensors (AICSS)\n1. Criar duas aplicações usando ESP32 e um LED\n2. A aplicação deve ter uma variável para armazenar o nome da máquina/equipamento\n3. O LED sinaliza que há uma falha\n4. O sistema deverá informar uma sequência de eventos de \"SUCESSO\" e depois dessa\nsequência de sucessos,"
+    ],
+    "faq": [
+      {
+        "question": "ae",
+        "answer": "Não entendi o que você quer dizer com “ae”. Pode esclarecer ou fazer uma pergunta específica sobre o AICSS‑CP1? Estou aqui para ajudar."
+      }
+    ],
+    "keyFacts": [
+      "Objetivo: AICSS - CP1.",
+      "Entregaveis: Arquivo \"AICSS (CP 1) e Cognitive DataScience (CP 1).pdf\"; Arquivo: AICSS (CP 1) e Cognitive DataScience (CP 1).pdf",
+      "AICSS (CP1) + Cognitive Data Science (CP1)",
+      "Tecnólogo em IA",
+      "Dados da entrega",
+      "Data: 13/03/2026",
+      "Entrega no Teams da respectiva disciplina",
+      "O problema do cotonifício Nonamed – registro de operação",
+      "Não entendi o que você quer dizer com “ae”. Pode esclarecer ou fazer uma pergunta específica sobre o AICSS‑CP1? Estou aqui para ajudar."
+    ],
+    "answerStyle": "Responder de forma objetiva, curta e sempre dizer quando algo nao foi encontrado.",
+    "fallbackPolicy": "Se a pergunta fugir do material persistido, consultar o LLM e salvar a resposta na memoria.",
+    "sourceSnippets": [
+      "Arquivo: AICSS (CP 1) e Cognitive DataScience (CP 1).pdf\nAICSS (CP1) + Cognitive Data Science (CP1)\nTecnólogo em IA\nDados da entrega\nData: 13/03/2026\nEntrega no Teams da respectiva disciplina\nTema\nO problema do cotonifício Nonamed – registro de operação\nO cotonifício Nonamed possui 2 máquinas de processamento de algodã",
+      "Disciplina: AI Computer Systems and Sensors (AICSS)\n1. Criar duas aplicações usando ESP32 e um LED\n2. A aplicação deve ter uma variável para armazenar o nome da máquina/equipamento\n3. O LED sinaliza que há uma falha\n4. O sistema deverá informar uma sequência de eventos de \"SUCESSO\" e depois dessa\nsequência de sucessos,"
+    ]
+  },
+  "learning": {
+    "frequentQuestions": [],
+    "learningTopics": [
+      {
+        "title": "Entenda o objetivo central",
+        "explanation": "Leia o enunciado de AICSS - CP1 pensando no resultado final que a atividade quer avaliar.",
+        "commonDifficulty": "Muita gente mistura objetivo da atividade com a lista de arquivos que precisa enviar.",
+        "studyStrategy": "Resuma em uma frase o objetivo do trabalho e depois confira onde cada parte aparece no enunciado."
+      },
+      {
+        "title": "Evite retrabalho e perda de pontos",
+        "explanation": "Os detalhes finos de submissao e avaliacao precisam ser conferidos no enunciado principal antes do envio.",
+        "commonDifficulty": "A parte que mais confunde costuma ser esquecer regra de submissao, formato ou requisito individual do grupo.",
+        "studyStrategy": "Reserve a revisao final para conferir nomes, formato e regras da entrega."
+      }
+    ],
+    "quickTips": []
+  },
+  "attachments": [
+    {
+      "path": "assets/attachments/aicss-cp1/aicss-cp-1-e-cognitive-datascience-cp-1-bbc6db6f83.pdf",
+      "key": "assets/attachments/aicss-cp1/aicss-cp-1-e-cognitive-datascience-cp-1-bbc6db6f83.pdf",
+      "name": "AICSS (CP 1) e Cognitive DataScience (CP 1).pdf",
+      "contentType": "application/pdf",
+      "size": 93321
+    }
+  ],
+  "screenshots": [
+    "assets/screenshots/aicss-cp1/aicss-cp1-list-3513e95d41.png",
+    "assets/screenshots/aicss-cp1/aicss-cp1-detail-816ed85c97.png"
+  ],
+  "updatedAt": "2026-03-22T17:12:00.058Z"
+}

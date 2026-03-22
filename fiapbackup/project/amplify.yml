@@ -1,0 +1,20 @@
+version: 1
+applications:
+  - appRoot: frontend
+    frontend:
+      buildPath: /
+      phases:
+        preBuild:
+          commands:
+            - npm ci --include=dev
+        build:
+          commands:
+            - npm run build -w @fiapauto/frontend
+      artifacts:
+        baseDirectory: frontend/dist
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - node_modules/**/*
+          - frontend/node_modules/**/*
