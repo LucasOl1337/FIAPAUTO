@@ -6,6 +6,7 @@ import type {
   PublishedKnowledgeChunk,
   PublicSyncStatus,
 } from '@fiapauto/backend/contracts'
+import { askOllamaCloudTopic, isOllamaCloudConfigured } from './ollamaCloud.ts'
 import { resolvePublicApiBase } from '../publicApiBase.ts'
 import { answerPublishedTopicQuestion } from './publicAssistant.ts'
 
@@ -96,7 +97,12 @@ export async function askPublicTopic(input: { topicId: string; question: string 
       throw new Error('public_chat_failed')
     }
 
-    return (await response.json()) as PublicTopicChatResult
+    const payload = (await response.json()) as PublicTopicChatResult
+    if (shouldAcceptPublicApiChatResult(payload) || !isOllamaCloudConfigured()) {
+      return payload
+    }
+
+    return recoverWithDirectOllama(input, payload)
   }
 
   const [topic, chunks] = await Promise.all([
@@ -109,6 +115,27 @@ export async function askPublicTopic(input: { topicId: string; question: string 
     chunks,
     question: input.question,
   }) satisfies PublicTopicChatResult
+}
+
+async function recoverWithDirectOllama(
+  input: { topicId: string; question: string },
+  fallbackPayload: PublicTopicChatResult,
+) {
+  try {
+    const [topic, chunks] = await Promise.all([
+      fetchPublicTopic(input.topicId),
+      fetchStaticJson<PublishedKnowledgeChunk[]>('/knowledge/chunks.json', 'public_chat_failed'),
+    ])
+
+    return await askOllamaCloudTopic({
+      topic,
+      chunks,
+      question: input.question,
+      buildAssetUrl: buildPublicAssetUrl,
+    })
+  } catch {
+    return fallbackPayload
+  }
 }
 
 export async function fetchPublicSyncStatus() {
@@ -205,4 +232,8 @@ function isTransientPublicApiStatus(status: number) {
 
 function delay(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
+function shouldAcceptPublicApiChatResult(payload: PublicTopicChatResult) {
+  return payload.providerUsed !== 'local' && payload.qualityStatus !== 'fallback'
 }
