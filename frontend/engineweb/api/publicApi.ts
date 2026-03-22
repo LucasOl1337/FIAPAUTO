@@ -6,11 +6,10 @@ import type {
   PublishedKnowledgeChunk,
   PublicSyncStatus,
 } from '@fiapauto/backend/contracts'
-import { getAccessToken, isCognitoConfigured } from '../auth/cognito.ts'
 import { askOllamaCloudTopic } from './ollamaCloud.ts'
 import { answerPublishedTopicQuestion } from './publicAssistant.ts'
 
-const PUBLIC_API_TUNNEL = 'https://exhibitions-sale-divide-dir.trycloudflare.com'
+const PUBLIC_API_TUNNEL = 'https://ricky-expo-doors-documents.trycloudflare.com'
 const PUBLIC_API_BASE = resolvePublicApiBase()
 const STATIC_PUBLIC_BASE = '/published'
 
@@ -44,13 +43,6 @@ async function buildPublicHeaders(init?: HeadersInit) {
   headers.set('Content-Type', 'application/json')
   if (PUBLIC_API_BASE && /\.loca\.lt$/i.test(new URL(PUBLIC_API_BASE).hostname)) {
     headers.set('bypass-tunnel-reminder', 'true')
-  }
-
-  if (isCognitoConfigured()) {
-    const token = await getAccessToken()
-    if (token) {
-      headers.set('Authorization', `Bearer ${token}`)
-    }
   }
 
   return headers

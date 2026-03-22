@@ -1,7 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
   getSignedInUserLabel,
-  getPublicAuthMode,
   isAuthRequired,
   pingCurrentUserActivity,
   signInAsVisitor,
@@ -22,7 +21,6 @@ export function UserAuthGate({ children }: UserAuthGateProps) {
   const [ready, setReady] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
-  const authMode = getPublicAuthMode()
 
   useEffect(() => {
     if (!isAuthRequired()) {
@@ -73,9 +71,7 @@ export function UserAuthGate({ children }: UserAuthGateProps) {
         <p className="hero-text">
           {mode === 'sign_up'
             ? 'Crie sua conta com email e senha e entre na hora para testar o portal publicado.'
-            : authMode === 'local'
-              ? 'Use um email e senha ja cadastrados neste navegador. Esse modo e temporario para validacao rapida.'
-              : 'Use sua conta configurada no Cognito para acessar o site publicado.'}
+            : 'Use um email e senha registrados no backend publico do projeto, ou entre como visitante.'}
         </p>
         <div className="admin-gate">
           <label className="admin-gate-label" htmlFor="user-email">Email</label>

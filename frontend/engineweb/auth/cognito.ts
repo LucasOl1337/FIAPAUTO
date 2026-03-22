@@ -1,22 +1,9 @@
-import { Amplify } from 'aws-amplify'
-import { fetchAuthSession, getCurrentUser, signIn, signOut, signUp } from 'aws-amplify/auth'
+type PublicAuthMode = 'local' | 'none'
 
-type PublicAuthMode = 'local' | 'cognito' | 'none'
-
-const cognitoConfig = {
-  region: import.meta.env.VITE_COGNITO_REGION ?? '',
-  userPoolId: import.meta.env.VITE_COGNITO_USER_POOL_ID ?? '',
-  userPoolClientId: import.meta.env.VITE_COGNITO_USER_POOL_CLIENT_ID ?? '',
-}
-
-const configuredAuthMode = normalizeAuthMode(import.meta.env.VITE_PUBLIC_AUTH_MODE)
-const authMode = configuredAuthMode === 'cognito' && isCognitoConfigComplete() ? 'cognito' : configuredAuthMode
-
+const authMode = normalizeAuthMode(import.meta.env.VITE_PUBLIC_AUTH_MODE)
 const LOCAL_AUTH_SESSION_KEY = 'fiapauto.publicAuth.session'
 const LOCAL_AUTH_TOKEN_KEY = 'fiapauto.publicAuth.token'
-const PUBLIC_API_TUNNEL = 'https://exhibitions-sale-divide-dir.trycloudflare.com'
-
-let configured = false
+const PUBLIC_API_TUNNEL = 'https://ricky-expo-doors-documents.trycloudflare.com'
 
 export function getPublicAuthMode(): PublicAuthMode {
   return authMode
@@ -27,168 +14,96 @@ export function isAuthRequired() {
 }
 
 export function isCognitoConfigured() {
-  return authMode === 'cognito'
+  return false
 }
 
 export function configureCognito() {
-  if (configured || authMode !== 'cognito') {
-    return
-  }
-
-  Amplify.configure({
-    Auth: {
-      Cognito: {
-        userPoolId: cognitoConfig.userPoolId,
-        userPoolClientId: cognitoConfig.userPoolClientId,
-      },
-    },
-  })
-
-  configured = true
+  return
 }
 
 export async function getAccessToken() {
-  if (authMode !== 'cognito') {
-    return ''
-  }
-
-  configureCognito()
-  const session = await fetchAuthSession()
-  return session.tokens?.accessToken?.toString() ?? ''
+  return ''
 }
 
 export async function getSignedInUserLabel() {
-  if (authMode === 'local') {
-    const token = readLocalAuthToken()
-    if (!token) {
-      return readLocalSession()?.email ?? ''
-    }
-
-    try {
-      const session = await requestLocalAuth<{ userLabel: string; email?: string; token: string; isGuest: boolean }>('/api/public/auth/me', {
-        method: 'GET',
-        token,
-      })
-      writeLocalSession({ email: session.email || session.userLabel, userLabel: session.userLabel, isGuest: session.isGuest })
-      return session.userLabel
-    } catch {
-      clearLocalSession()
-      clearLocalAuthToken()
-      return ''
-    }
+  const token = readLocalAuthToken()
+  if (!token) {
+    return readLocalSession()?.email ?? ''
   }
 
-  if (authMode !== 'cognito') {
+  try {
+    const session = await requestLocalAuth<{ userLabel: string; email?: string; token: string; isGuest: boolean }>('/api/public/auth/me', {
+      method: 'GET',
+      token,
+    })
+    writeLocalSession({ email: session.email || session.userLabel, userLabel: session.userLabel, isGuest: session.isGuest })
+    return session.userLabel
+  } catch {
+    clearLocalSession()
+    clearLocalAuthToken()
     return ''
   }
-
-  configureCognito()
-  const user = await getCurrentUser()
-  return user.signInDetails?.loginId ?? user.username
 }
 
 export async function signInWithPassword(username: string, password: string) {
-  if (authMode === 'local') {
-    const session = await requestLocalAuth<{ token: string; userLabel: string; isGuest: boolean; email?: string }>('/api/public/auth/sign-in', {
-      method: 'POST',
-      body: { email: username, password },
-    })
-    writeLocalAuthToken(session.token)
-    writeLocalSession({ email: session.email || session.userLabel, userLabel: session.userLabel, isGuest: session.isGuest })
-    return { nextStep: { signInStep: 'DONE' } }
-  }
-
-  configureCognito()
-  return signIn({
-    username,
-    password,
+  const session = await requestLocalAuth<{ token: string; userLabel: string; isGuest: boolean; email?: string }>('/api/public/auth/sign-in', {
+    method: 'POST',
+    body: { email: username, password },
   })
+  writeLocalAuthToken(session.token)
+  writeLocalSession({ email: session.email || session.userLabel, userLabel: session.userLabel, isGuest: session.isGuest })
+  return { nextStep: { signInStep: 'DONE' } }
 }
 
 export async function signUpWithPassword(input: {
   email: string
   password: string
 }) {
-  if (authMode === 'local') {
-    const session = await requestLocalAuth<{ token: string; userLabel: string; isGuest: boolean; email?: string }>('/api/public/auth/sign-up', {
-      method: 'POST',
-      body: input,
-    })
-    writeLocalAuthToken(session.token)
-    writeLocalSession({ email: session.email || session.userLabel, userLabel: session.userLabel, isGuest: session.isGuest })
-    return { isSignUpComplete: true }
-  }
-
-  configureCognito()
-  return signUp({
-    username: input.email,
-    password: input.password,
-    options: {
-      userAttributes: {
-        email: input.email,
-      },
-      autoSignIn: true,
-    },
+  const session = await requestLocalAuth<{ token: string; userLabel: string; isGuest: boolean; email?: string }>('/api/public/auth/sign-up', {
+    method: 'POST',
+    body: input,
   })
+  writeLocalAuthToken(session.token)
+  writeLocalSession({ email: session.email || session.userLabel, userLabel: session.userLabel, isGuest: session.isGuest })
+  return { isSignUpComplete: true }
 }
 
 export async function confirmUserSignUp(input: {
   email: string
   code: string
 }) {
-  if (authMode === 'local') {
-    return {
-      isSignUpComplete: true,
-      nextStep: { signUpStep: 'DONE' },
-      email: input.email,
-      code: input.code,
-    }
+  return {
+    isSignUpComplete: true,
+    nextStep: { signUpStep: 'DONE' },
+    email: input.email,
+    code: input.code,
   }
-
-  throw new Error('cognito_confirmation_disabled_in_temporary_mode')
 }
 
 export async function resendUserConfirmationCode(email: string) {
-  if (authMode === 'local') {
-    return { destination: email }
-  }
-
-  throw new Error('cognito_confirmation_disabled_in_temporary_mode')
+  return { destination: email }
 }
 
 export async function signOutCurrentUser() {
-  if (authMode === 'local') {
-    const token = readLocalAuthToken()
-    if (token) {
-      try {
-        await requestLocalAuth('/api/public/auth/sign-out', {
-          method: 'POST',
-          token,
-        })
-      } catch {
-        // Best effort only; local session cleanup still proceeds.
-      }
+  const token = readLocalAuthToken()
+  if (token) {
+    try {
+      await requestLocalAuth('/api/public/auth/sign-out', {
+        method: 'POST',
+        token,
+      })
+    } catch {
+      // Best effort.
     }
-    clearLocalSession()
-    clearLocalAuthToken()
-    return
   }
 
-  if (authMode !== 'cognito') {
-    return
-  }
-
-  configureCognito()
-  await signOut()
-}
-
-function isCognitoConfigComplete() {
-  return Boolean(cognitoConfig.region && cognitoConfig.userPoolId && cognitoConfig.userPoolClientId)
+  clearLocalSession()
+  clearLocalAuthToken()
 }
 
 function normalizeAuthMode(value: string | undefined): PublicAuthMode {
-  if (value === 'cognito' || value === 'none') {
-    return value
+  if (value === 'none') {
+    return 'none'
   }
 
   return 'local'
@@ -229,10 +144,6 @@ function clearLocalSession() {
 }
 
 export async function signInAsVisitor() {
-  if (authMode !== 'local') {
-    throw new Error('visitor_mode_only_available_in_local_auth')
-  }
-
   const session = await requestLocalAuth<{ token: string; userLabel: string; isGuest: boolean; email?: string }>('/api/public/auth/guest', {
     method: 'POST',
   })
@@ -242,10 +153,6 @@ export async function signInAsVisitor() {
 }
 
 export async function pingCurrentUserActivity() {
-  if (authMode !== 'local') {
-    return
-  }
-
   const token = readLocalAuthToken()
   if (!token) {
     return
@@ -257,7 +164,7 @@ export async function pingCurrentUserActivity() {
       token,
     })
   } catch {
-    // Ignore heartbeat failures; the visible session can recover on next page load.
+    // Ignore heartbeat failures.
   }
 }
 
@@ -314,7 +221,7 @@ async function requestLocalAuth<T = unknown>(
         errorCode = payload.error
       }
     } catch {
-      // Keep default error code when the body isn't JSON.
+      // Keep default.
     }
     throw new Error(errorCode)
   }
