@@ -1,14 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <rect width="64" height="64" rx="18" fill="#101010"/>
+  <rect width="64" height="64" rx="18" fill="#0f0f10"/>
   <defs>
-    <linearGradient id="ff-red" x1="8" y1="6" x2="55" y2="56" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FF7272"/>
-      <stop offset=".35" stop-color="#FF3F52"/>
-      <stop offset="1" stop-color="#C6002B"/>
+    <linearGradient id="ff-red" x1="8" y1="8" x2="54" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF8080"/>
+      <stop offset=".38" stop-color="#FF394D"/>
+      <stop offset="1" stop-color="#C30029"/>
     </linearGradient>
   </defs>
   <g fill="url(#ff-red)">
-    <path d="M12 16c0-3.314 2.686-6 6-6h17c-.709 5.617-5.502 10-11.312 10H18v6h12l-6 8H18v18h-6V16Z"/>
-    <path d="M36 16c0-3.314 2.686-6 6-6h17c-.709 5.617-5.502 10-11.312 10H42v6h12l-6 8H42v18h-6V16Z"/>
+    <path d="M11 12c0-2.8 2.2-5 5-5h14c-.5 4.9-4.6 8.7-9.6 8.7H16v4.4h10.5l-4.6 6.2H16V40h-5z"/>
+    <path d="M35 12c0-2.8 2.2-5 5-5h14c-.5 4.9-4.6 8.7-9.6 8.7H40v4.4h10.5l-4.6 6.2H40V40h-5z"/>
+    <path d="M11 35c0-2.8 2.2-5 5-5h14c-.5 4.9-4.6 8.7-9.6 8.7H16V43h10.5l-4.6 6.2H16V57h-5z"/>
+    <path d="M35 35c0-2.8 2.2-5 5-5h14c-.5 4.9-4.6 8.7-9.6 8.7H40V43h10.5l-4.6 6.2H40V57h-5z"/>
   </g>
 </svg>

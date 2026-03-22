@@ -36,10 +36,9 @@ function PublicApp(props: { userLabel: string }) {
           <div className="brand-block">
             <div className="brand-line">
               <BrandMark />
-              <p className="eyebrow">FIAPAUTO</p>
+              <p className="eyebrow">FiapFlow</p>
             </div>
-            <h1>Assistente de Materias</h1>
-            <p className="hero-text">Experiencia publica focada em entender entregaveis, contexto da materia e proximos passos.</p>
+            <h1>Assistente de Estudos</h1>
           </div>
           {props.userLabel ? (
             <div className="action-row">
@@ -97,16 +96,18 @@ function BrandMark() {
     <span className="brand-mark" aria-hidden="true">
       <svg viewBox="0 0 64 64" role="img">
         <defs>
-          <linearGradient id="brand-red" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#ff6969" />
-            <stop offset="35%" stopColor="#ff3d4f" />
-            <stop offset="100%" stopColor="#c6002b" />
+          <linearGradient id="brand-red" x1="8" y1="8" x2="54" y2="56">
+            <stop offset="0%" stopColor="#ff8080" />
+            <stop offset="38%" stopColor="#ff394d" />
+            <stop offset="100%" stopColor="#c30029" />
           </linearGradient>
         </defs>
-        <rect width="64" height="64" rx="18" fill="#111" />
+        <rect width="64" height="64" rx="18" fill="#0f0f10" />
         <g fill="url(#brand-red)">
-          <path d="M12 16c0-3.3 2.7-6 6-6h16c0 5.5-4.5 10-10 10H18v6h12l-6 8H18v16h-6z" />
-          <path d="M36 16c0-3.3 2.7-6 6-6h16c0 5.5-4.5 10-10 10H42v6h12l-6 8H42v16h-6z" />
+          <path d="M11 12c0-2.8 2.2-5 5-5h14c-.5 4.9-4.6 8.7-9.6 8.7H16v4.4h10.5l-4.6 6.2H16V40h-5z" />
+          <path d="M35 12c0-2.8 2.2-5 5-5h14c-.5 4.9-4.6 8.7-9.6 8.7H40v4.4h10.5l-4.6 6.2H40V40h-5z" />
+          <path d="M11 35c0-2.8 2.2-5 5-5h14c-.5 4.9-4.6 8.7-9.6 8.7H16V43h10.5l-4.6 6.2H16V57h-5z" />
+          <path d="M35 35c0-2.8 2.2-5 5-5h14c-.5 4.9-4.6 8.7-9.6 8.7H40V43h10.5l-4.6 6.2H40V57h-5z" />
         </g>
       </svg>
     </span>
