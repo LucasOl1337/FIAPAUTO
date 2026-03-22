@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { botConfig, type AssignmentItem } from '@fiapauto/bots'
+import type { TopicDebugResult, ValidatedAnswerEntry } from '../apis/contracts/index.ts'
 import { ensureDir, readJsonFile, writeJsonFile } from '../database/fs.ts'
 import { readLlmDebugHistory } from '../connections/llm/llmDebugStore.ts'
 import {
@@ -14,6 +15,7 @@ import { appendConversationTurn, readConversationState } from './conversationSta
 import { buildDeterministicResponse } from './deterministicResponder.ts'
 import { classifyQuestionIntent } from './questionIntentClassifier.ts'
 import { buildTopicContextBundle, type TopicCitation } from './topicContextBuilder.ts'
+import { listValidatedAnswerEntries, saveValidatedAnswerEntry } from './knowledgeWarehouse.ts'
 import { routeAssistantChat } from '../connections/llm/providerRouter.ts'
 
 type WorkspaceReport = {
@@ -46,9 +48,17 @@ export type TopicLearningConcept = {
   content: string
 }
 
+export type TopicLearningTopic = {
+  title: string
+  explanation: string
+  commonDifficulty: string
+  studyStrategy: string
+}
+
 export type TopicLearning = {
   frequentQuestions: TopicFaqItem[]
-  simpleConcepts: TopicLearningConcept[]
+  learningTopics: TopicLearningTopic[]
+  simpleConcepts?: TopicLearningConcept[]
   quickTips: string[]
 }
 
@@ -143,6 +153,9 @@ const supportedTextExtensions = new Set([
   '.yaml',
 ])
 
+const CURRENT_LEARNING_VERSION = 2
+const DEFAULT_LEARNING_MODEL = process.env.LEARNING_LLM_MODEL ?? 'qwen3.5:cloud'
+
 export async function syncTopicsFromAssignments() {
   await ensureDir(botConfig.subjectsDir)
 
@@ -217,16 +230,14 @@ export async function syncTopicsFromAssignments() {
       !previous ||
       previous.sourceSignature !== sourceSignature ||
       !previous.learningGeneratedAt
-    const learningGeneratedAt = shouldRefreshLearning ? new Date().toISOString() : learningState.generatedAt ?? previous?.learningGeneratedAt
-    const learning = shouldRefreshLearning
-      ? buildAutomaticTopicLearning(baseTopic, learningMemory)
-      : learningState.learning ?? null
+    const refreshedLearningState = shouldRefreshLearning
+      ? await generateLearningState(baseTopic, learningMemory)
+      : null
+    const learningGeneratedAt = refreshedLearningState?.generatedAt ?? learningState.generatedAt ?? previous?.learningGeneratedAt
+    const learning = refreshedLearningState?.learning ?? learningState.learning ?? null
 
-    if (learning && learningGeneratedAt && (shouldRefreshLearning || !learningState.learning)) {
-      await writeLearningFile(topicId, {
-        learning,
-        generatedAt: learningGeneratedAt,
-      })
+    if (refreshedLearningState) {
+      await writeLearningFile(topicId, refreshedLearningState)
     }
 
     const topic: SubjectTopic = {
@@ -273,7 +284,11 @@ export async function getTopicById(topicId: string) {
   return topic
 }
 
-export async function generateTopicSummary(topicId: string, force = false) {
+export async function generateTopicSummary(
+  topicId: string,
+  force = false,
+  options?: { skipLearningRefresh?: boolean },
+) {
   const topics = await syncTopicsFromAssignments()
   const topic = topics.find((item) => item.id === topicId)
 
@@ -282,6 +297,10 @@ export async function generateTopicSummary(topicId: string, force = false) {
   }
 
   if (topic.summary && topic.summaryGeneratedAt && !force) {
+    if (!options?.skipLearningRefresh && !topic.learning) {
+      await generateTopicLearning(topicId, false)
+    }
+
     return {
       topicId: topic.id,
       moduleKey: topic.moduleKey,
@@ -299,7 +318,7 @@ export async function generateTopicSummary(topicId: string, force = false) {
     'Voce e um assistente academico objetivo.',
     'Resuma o topico em portugues do Brasil.',
     'Use no maximo 8 linhas.',
-    'Inclua: objetivo, entregaveis, prazo, pontos de atencao e contexto da materia.',
+    'Inclua: objetivo, entregaveis, pontos de atencao e contexto da materia.',
     'Se algo nao estiver claro, diga explicitamente que nao foi encontrado.',
     'Nao use markdown.',
   ].join(' ')
@@ -320,27 +339,17 @@ export async function generateTopicSummary(topicId: string, force = false) {
     summary,
     generatedAt,
   })
-  const learning = buildAutomaticTopicLearning(
-    {
-      ...topic,
-      summary,
-      summaryGeneratedAt: generatedAt,
-    },
-    topic.agentMemory ?? buildFallbackMemory({ ...topic, summary }),
-  )
-  await writeLearningFile(topic.id, {
-    learning,
-    generatedAt,
-  })
 
   await updateTopicRecord(topic.id, (current) => ({
     ...current,
     summary,
     summaryGeneratedAt: generatedAt,
-    learning,
-    learningGeneratedAt: generatedAt,
     updatedAt: generatedAt,
   }))
+
+  if (!options?.skipLearningRefresh) {
+    await generateTopicLearning(topic.id, true)
+  }
 
   return {
     topicId: topic.id,
@@ -352,7 +361,11 @@ export async function generateTopicSummary(topicId: string, force = false) {
   } satisfies TopicSummaryResult
 }
 
-export async function generateTopicMemory(topicId: string, force = false) {
+export async function generateTopicMemory(
+  topicId: string,
+  force = false,
+  options?: { skipLearningRefresh?: boolean },
+) {
   const topic = await getTopicById(topicId)
   const sanitizedExistingMemory = topic.agentMemory ? sanitizeTopicMemory(topic.agentMemory) : null
 
@@ -363,10 +376,13 @@ export async function generateTopicMemory(topicId: string, force = false) {
         generatedAt: topic.agentMemoryGeneratedAt,
       })
     }
+    if (!options?.skipLearningRefresh && !topic.learning) {
+      await generateTopicLearning(topicId, false)
+    }
     return sanitizedExistingMemory
   }
 
-  const summaryResult = await generateTopicSummary(topicId, false)
+  const summaryResult = await generateTopicSummary(topicId, false, { skipLearningRefresh: true })
   const freshTopic = await getTopicById(topicId)
   const jobId = `topic-memory-${topicId}-${Date.now()}`
   const prompt = [
@@ -374,6 +390,7 @@ export async function generateTopicMemory(topicId: string, force = false) {
     'Responda somente em JSON valido.',
     'Use exatamente estas chaves:',
     'overview, deliverables, deadlines, faq, keyFacts, answerStyle, fallbackPolicy, sourceSnippets.',
+    'deadlines deve ficar sempre como array vazio. Nao priorize prazo, data ou horario de entrega.',
     'faq deve ser um array de objetos com question e answer.',
     'Nao invente informacoes ausentes.',
     `Resumo atual: ${summaryResult.summary}`,
@@ -397,30 +414,46 @@ export async function generateTopicMemory(topicId: string, force = false) {
     memory: sanitizedMemory,
     generatedAt,
   })
-  const learning = buildAutomaticTopicLearning(
-    {
-      ...freshTopic,
-      summary: summaryResult.summary,
-      agentMemory: sanitizedMemory,
-      agentMemoryGeneratedAt: generatedAt,
-    },
-    sanitizedMemory,
-  )
-  await writeLearningFile(topicId, {
-    learning,
-    generatedAt,
-  })
 
   await updateTopicRecord(topicId, (current) => ({
     ...current,
     agentMemory: sanitizedMemory,
     agentMemoryGeneratedAt: generatedAt,
-    learning,
-    learningGeneratedAt: generatedAt,
     updatedAt: generatedAt,
   }))
 
+  if (!options?.skipLearningRefresh) {
+    await generateTopicLearning(topicId, true)
+  }
+
   return sanitizedMemory
+}
+
+export async function generateTopicLearning(topicId: string, force = false) {
+  const topic = await getTopicById(topicId)
+
+  if (topic.learning && topic.learningGeneratedAt && !force) {
+    return topic.learning
+  }
+
+  await generateTopicSummary(topicId, false, { skipLearningRefresh: true })
+  const memory = await generateTopicMemory(topicId, false, { skipLearningRefresh: true })
+  const freshTopic = await getTopicById(topicId)
+  const nextTopic: SubjectTopic = {
+    ...freshTopic,
+    agentMemory: memory,
+  }
+  const learningState = await generateLearningState(nextTopic, memory)
+
+  await writeLearningFile(topicId, learningState)
+  await updateTopicRecord(topicId, (current) => ({
+    ...current,
+    learning: learningState.learning,
+    learningGeneratedAt: learningState.generatedAt,
+    updatedAt: learningState.generatedAt,
+  }))
+
+  return learningState.learning
 }
 
 export async function askTopic(input: { topicId: string; question: string }) {
@@ -442,7 +475,7 @@ export async function askTopic(input: { topicId: string; question: string }) {
   const isGreeting = intent === 'greeting'
 
   if (isGreeting) {
-    const answer = `Posso te ajudar com ${topic.title}. Se quiser, pergunte sobre prazo, entregaveis, checklist, criterios de avaliacao ou um item especifico do trabalho.`
+    const answer = `Posso te ajudar com ${topic.title}. Se quiser, pergunte sobre entregaveis, checklist, criterios de avaliacao ou um item especifico do trabalho.`
     await appendConversationTurn(topic.id, {
       question: input.question,
       answer,
@@ -460,7 +493,7 @@ export async function askTopic(input: { topicId: string; question: string }) {
       providerUsed: 'local',
       fallbackLevel: 0,
       citations: [],
-      suggestedQuestions: ['O que preciso entregar?', 'Qual e o prazo?', 'Como resolver o item 4?'],
+      suggestedQuestions: ['O que preciso entregar?', 'Me faca um checklist', 'Como resolver o item 4?'],
       nextSteps: ['Escolha uma duvida objetiva sobre esse trabalho para eu te orientar melhor.'],
     } satisfies TopicAskResult
   }
@@ -526,6 +559,11 @@ export async function askTopic(input: { topicId: string; question: string }) {
       answeredAt,
       usedFallback: providerResponse.strategyUsed !== 'rag_llm',
       persistToFaq: true,
+      strategyUsed: providerResponse.strategyUsed,
+      providerUsed: providerResponse.providerUsed,
+      fallbackLevel: providerResponse.fallbackLevel,
+      citations: context.localCitations,
+      questionIntent: intent,
     })
     await appendConversationTurn(topic.id, {
       question: input.question,
@@ -554,6 +592,11 @@ export async function askTopic(input: { topicId: string; question: string }) {
       answeredAt,
       usedFallback: true,
       persistToFaq: false,
+      strategyUsed: 'deterministic',
+      providerUsed: 'local',
+      fallbackLevel: 2,
+      citations: context.localCitations,
+      questionIntent: intent,
     })
     await appendConversationTurn(topic.id, {
       question: input.question,
@@ -581,12 +624,33 @@ export async function askTopic(input: { topicId: string; question: string }) {
 
 export async function getTopicDebug(topicId: string) {
   const topic = await getTopicById(topicId)
+  const history = await readTopicQuestionHistory(topicId)
+  const memory = topic.agentMemory ?? buildFallbackMemory(topic)
+  const latestQuestion = history[0]?.question?.trim() ?? ''
+  const context = latestQuestion
+    ? await buildTopicContextBundle({
+        topic,
+        memory,
+        question: latestQuestion,
+        conversation: await readConversationState(topic.id),
+      })
+    : null
+
   return {
     topic,
-    history: await readTopicQuestionHistory(topicId),
+    history,
     events: await readLlmDebugHistory(100, topicId),
     llm: llmConfig(),
-  }
+    libraryMatches: context?.libraryMatches ?? [],
+    libraryDecision: context?.libraryDecision ?? {
+      question: latestQuestion,
+      summary: latestQuestion ? 'Nenhum match relevante foi aceito para a ultima pergunta.' : 'Ainda nao existe pergunta para analisar a biblioteca.',
+      considered: 0,
+      accepted: 0,
+      rejected: 0,
+    },
+    validatedAnswerCandidates: await listValidatedAnswerEntries(topicId),
+  } satisfies TopicDebugResult
 }
 
 export async function recordTopicQuestionAnswer(
@@ -597,6 +661,11 @@ export async function recordTopicQuestionAnswer(
     answeredAt?: string
     usedFallback?: boolean
     persistToFaq?: boolean
+    strategyUsed?: TopicAskResult['strategyUsed']
+    providerUsed?: TopicAskResult['providerUsed']
+    fallbackLevel?: number
+    citations?: TopicCitation[]
+    questionIntent?: ReturnType<typeof classifyQuestionIntent>
   },
 ) {
   const topic = await getTopicById(topicId)
@@ -628,6 +697,18 @@ export async function recordTopicQuestionAnswer(
     updatedAt: answeredAt,
   }))
 
+  const validatedAnswerCandidate = buildValidatedAnswerCandidate({
+    topic,
+    question,
+    answer,
+    answeredAt,
+    options,
+  })
+
+  if (validatedAnswerCandidate) {
+    await saveValidatedAnswerEntry(validatedAnswerCandidate)
+  }
+
   return {
     topic: {
       ...topic,
@@ -638,7 +719,70 @@ export async function recordTopicQuestionAnswer(
     },
     memory: updatedMemory,
     historyEntry,
+    validatedAnswerCandidate,
   }
+}
+
+function buildValidatedAnswerCandidate(input: {
+  topic: SubjectTopic
+  question: string
+  answer: string
+  answeredAt: string
+  options?: {
+    strategyUsed?: TopicAskResult['strategyUsed']
+    providerUsed?: TopicAskResult['providerUsed']
+    fallbackLevel?: number
+    citations?: TopicCitation[]
+    questionIntent?: ReturnType<typeof classifyQuestionIntent>
+    usedFallback?: boolean
+  }
+}): ValidatedAnswerEntry | null {
+  const strategyUsed = input.options?.strategyUsed
+  const providerUsed = input.options?.providerUsed
+  const citations = (input.options?.citations ?? []).filter((item) => item.snippet.trim().length >= 20)
+  const intent = input.options?.questionIntent ?? classifyQuestionIntent(input.question)
+
+  if (!strategyUsed || strategyUsed === 'memory' || strategyUsed === 'deterministic') {
+    return null
+  }
+
+  if (providerUsed === 'local') {
+    return null
+  }
+
+  if (!isUsefulQuestion(input.question) || !isQuestionAnswerSafeForReuse(input.question, input.answer)) {
+    return null
+  }
+
+  if (citations.length === 0) {
+    return null
+  }
+
+  if (/\b(nao encontrei|n[aã]o encontrei|nenhuma referencia|nenhuma referência)\b/i.test(input.answer)) {
+    return null
+  }
+
+  const groundingScore = computeGroundingScore(input.answer, citations)
+  const isCriticalIntent = intent === 'deliverable' || intent === 'grading' || intent === 'format'
+  if (groundingScore < (isCriticalIntent ? 0.78 : 0.62)) {
+    return null
+  }
+
+  return {
+    id: `validated:${input.topic.id}:${hashText(`${input.question}:${input.answer}`)}`,
+    topicId: input.topic.id,
+    topicTitle: input.topic.title,
+    moduleKey: input.topic.moduleKey,
+    question: input.question.trim(),
+    answer: input.answer.trim(),
+    citations: citations.slice(0, 4),
+    strategyUsed,
+    providerUsed,
+    groundingScore: Number(groundingScore.toFixed(2)),
+    sourceSignature: input.topic.sourceSignature,
+    questionIntent: intent,
+    createdAt: input.answeredAt,
+  } satisfies ValidatedAnswerEntry
 }
 
 async function readTopicsIndex() {
@@ -680,14 +824,21 @@ async function readStoredMemory(topicId: string) {
 }
 
 async function readStoredLearning(topicId: string) {
-  const value = await readJsonFile<{ learning?: TopicLearning; generatedAt?: string }>(
+  const value = await readJsonFile<{
+    learning?: TopicLearning
+    generatedAt?: string
+    model?: string
+    version?: number
+  }>(
     path.join(getTopicDir(topicId), 'learning.json'),
     {},
   )
 
   return {
-    learning: isTopicLearning(value.learning) ? value.learning : undefined,
+    learning: normalizeTopicLearning(value.learning) ?? undefined,
     generatedAt: typeof value.generatedAt === 'string' ? value.generatedAt : undefined,
+    model: typeof value.model === 'string' ? value.model : undefined,
+    version: typeof value.version === 'number' ? value.version : undefined,
   }
 }
 
@@ -703,7 +854,12 @@ async function writeMemoryFile(topicId: string, value: { memory: TopicAgentMemor
   await writeJsonFile(path.join(getTopicDir(topicId), 'memory.json'), value)
 }
 
-async function writeLearningFile(topicId: string, value: { learning: TopicLearning; generatedAt: string }) {
+async function writeLearningFile(topicId: string, value: {
+  learning: TopicLearning
+  generatedAt: string
+  model: string
+  version: number
+}) {
   await writeJsonFile(path.join(getTopicDir(topicId), 'learning.json'), value)
 }
 
@@ -725,7 +881,6 @@ async function buildTopicContentText(topicId: string, assignment: AssignmentItem
       `Titulo: ${assignment.title}`,
       `Curso: ${assignment.course || 'nao identificado'}`,
       `Status: ${assignment.status}`,
-      `Prazo: ${assignment.dueText || 'nao encontrado'}`,
       `Link de detalhe: ${assignment.detailUrl || 'nao encontrado'}`,
       `Modulo sugerido: ${detectModuleKey(assignment)}`,
       `Arquivos baixados: ${assignment.downloadedFiles.map((item) => path.basename(item)).join(', ') || 'nenhum'}`,
@@ -783,7 +938,6 @@ async function buildTopicContentSafely(topicId: string, assignment: AssignmentIt
           `Titulo: ${assignment.title}`,
           `Curso: ${assignment.course || 'nao identificado'}`,
           `Status: ${assignment.status}`,
-          `Prazo: ${assignment.dueText || 'nao encontrado'}`,
           `Link de detalhe: ${assignment.detailUrl || 'nao encontrado'}`,
           `Arquivos baixados: ${assignment.downloadedFiles.map((item) => path.basename(item)).join(', ') || 'nenhum'}`,
         ].join('\n'),
@@ -895,7 +1049,7 @@ async function buildTopicImages(topic: SubjectTopic) {
 
 function answerFromLocalMemory(topic: SubjectTopic, memory: TopicAgentMemory, question: string) {
   const snippets = findRelevantSnippets(
-    [memory.overview, ...memory.keyFacts, ...memory.deliverables, ...memory.deadlines, ...memory.sourceSnippets, topic.summary]
+    [memory.overview, ...memory.keyFacts, ...memory.deliverables, ...memory.sourceSnippets, topic.summary]
       .filter(Boolean)
       .join('\n'),
     question,
@@ -934,11 +1088,18 @@ function answerFromLocalMemory(topic: SubjectTopic, memory: TopicAgentMemory, qu
 function buildAssistantPrompt(topic: SubjectTopic, question: string, context: {
   intent: string
   citations: TopicCitation[]
+  libraryCitations: Array<{
+    sourceType: string
+    sourceLabel: string
+    snippet: string
+  }>
   keyFacts: string[]
-  deadlineHints: string[]
   deliverableHints: string[]
   numberedHints: string[]
   conversationSummary: string
+  libraryDecision: {
+    summary: string
+  }
 }) {
   return [
     'Voce e um assistente academico util, claro e honesto.',
@@ -946,19 +1107,25 @@ function buildAssistantPrompt(topic: SubjectTopic, question: string, context: {
     `Intencao principal da pergunta: ${context.intent}.`,
     `Pergunta do usuario: ${question}`,
     'Responda em portugues do Brasil, com tom natural, acolhedor e objetivo, em no maximo 8 linhas.',
+    'Prioridade de confianca: 1) material atual do topico, 2) memoria/FAQ local, 3) biblioteca global de casos parecidos.',
+    'A biblioteca global nunca substitui fato confirmado do topico atual.',
     context.intent === 'numbered_item'
       ? 'Se a pergunta citar um item numerado, use como fonte principal apenas o trecho numerado recuperado. Explique exatamente esse item em linguagem simples, diga o que a pessoa precisa fazer e evite responder com resumo generico do trabalho ou com outros itens de mesmo numero em outra secao.'
       : '',
     'Prefira explicar como um aluno iniciante deve agir agora.',
     'Baseie-se apenas no contexto enviado.',
     'Se algo nao estiver confirmado, diga explicitamente que nao foi encontrado no material.',
+    'Se voce aproveitar um caso parecido da biblioteca sem confirmacao local, deixe claro que se trata de orientacao baseada em caso parecido e nao de uma regra confirmada para este topico.',
     'Nao use markdown pesado, tabelas ou invente detalhes.',
     context.keyFacts.length > 0 ? `Fatos-chave: ${context.keyFacts.join(' | ')}` : '',
-    context.deadlineHints.length > 0 ? `Prazos detectados: ${context.deadlineHints.join(' | ')}` : '',
     context.deliverableHints.length > 0 ? `Entregaveis detectados: ${context.deliverableHints.join(' | ')}` : '',
     context.numberedHints.length > 0 ? `Trechos numerados possivelmente relevantes: ${context.numberedHints.join(' | ')}` : '',
     context.conversationSummary ? `Resumo curto da conversa recente:\n${context.conversationSummary}` : '',
     `Fontes recuperadas:\n${context.citations.map((item) => `- [${item.sourceType}] ${item.snippet}`).join('\n')}`,
+    context.libraryCitations.length > 0
+      ? `Biblioteca de casos parecidos:\n${context.libraryCitations.map((item) => `- [${item.sourceType}] ${item.sourceLabel}: ${item.snippet}`).join('\n')}`
+      : '',
+    context.libraryDecision.summary ? `Politica da biblioteca: ${context.libraryDecision.summary}` : '',
   ]
     .filter(Boolean)
     .join('\n')
@@ -973,13 +1140,13 @@ function normalizeAssistantAnswer(value: string) {
     .trim()
 }
 
-function normalizePersistedSummary(summary: string, dueText?: string) {
+function normalizePersistedSummary(summary: string, _dueText?: string) {
   const lines = summary
     .split(/\n+/)
     .map((item) => item.trim())
     .filter(Boolean)
 
-  const preferredOrder = ['contexto', 'objetivo', 'entregaveis', 'prazo', 'pontos de atencao', 'curso']
+  const preferredOrder = ['contexto', 'objetivo', 'entregaveis', 'pontos de atencao', 'curso']
   const sections = new Map<string, string>()
 
   for (const line of lines) {
@@ -1004,7 +1171,6 @@ function normalizePersistedSummary(summary: string, dueText?: string) {
     }
 
     if (rawLabel === 'prazo') {
-      sections.set(rawLabel, extractDateOnly(rawValue) || extractDateOnly(dueText) || 'Data nao identificada no material.')
       continue
     }
 
@@ -1065,7 +1231,7 @@ function buildFallbackMemory(topic: SubjectTopic) {
   return {
     overview: topic.summary || buildDeterministicSummary(topic),
     deliverables: collectDeliverables(topic),
-    deadlines: collectDeadlines(topic),
+    deadlines: [],
     faq: [],
     keyFacts: extractBulletLikeFacts(topic.summary || topic.contentText).slice(0, 8),
     answerStyle: 'Responder de forma objetiva, curta e sempre dizer quando algo nao foi encontrado.',
@@ -1074,12 +1240,46 @@ function buildFallbackMemory(topic: SubjectTopic) {
   } satisfies TopicAgentMemory
 }
 
-function buildAutomaticTopicLearning(topic: SubjectTopic, memory: TopicAgentMemory): TopicLearning {
+async function generateLearningState(topic: SubjectTopic, memory: TopicAgentMemory) {
+  const generatedAt = new Date().toISOString()
+  const fallback = sanitizeTopicLearning(buildFallbackTopicLearning(topic, memory))
+
+  try {
+    const response = await postLlmChat({
+      jobId: `topic-learning-${topic.id}-${Date.now()}`,
+      topicId: topic.id,
+      mode: 'default',
+      message: buildLearningPrompt(topic, memory),
+      documents: buildLearningDocuments(topic, memory),
+      images: await buildTopicImages(topic),
+      requestOptions: {
+        model: DEFAULT_LEARNING_MODEL,
+      },
+    })
+    const parsed = parseLearningPayload(response.content)
+    const learning = sanitizeTopicLearning(parsed ?? fallback)
+
+    return {
+      learning,
+      generatedAt,
+      model: parsed ? DEFAULT_LEARNING_MODEL : 'fallback',
+      version: CURRENT_LEARNING_VERSION,
+    }
+  } catch {
+    return {
+      learning: fallback,
+      generatedAt,
+      model: 'fallback',
+      version: CURRENT_LEARNING_VERSION,
+    }
+  }
+}
+
+function buildFallbackTopicLearning(topic: SubjectTopic, memory: TopicAgentMemory): TopicLearning {
   const deliverables = collectHumanDeliverables(topic, memory)
-  const deadline = extractDateOnly(topic.dueText) || extractDateOnly(memory.deadlines[0]) || 'Data nao identificada no material.'
   const overview = topic.summary || memory.overview || `Atividade: ${topic.title}.`
   const gradingTips = collectPenaltyLearningTips(topic, memory)
-  const firstSteps = buildLearningFirstSteps(topic, deliverables, deadline)
+  const firstSteps = buildLearningFirstSteps(topic, deliverables)
 
   return {
     frequentQuestions: [
@@ -1090,50 +1290,126 @@ function buildAutomaticTopicLearning(topic: SubjectTopic, memory: TopicAgentMemo
           : 'Os entregaveis nao ficaram totalmente claros no material, entao vale abrir o anexo principal para confirmar.',
       },
       {
-        question: 'Qual e o prazo dessa atividade?',
-        answer: deadline === 'Data nao identificada no material.'
-          ? 'A data exata nao apareceu no material salvo. Abra o anexo principal e confira a data na atividade original.'
-          : `A data identificada para essa atividade e ${deadline}.`,
-      },
-      {
         question: 'Como comeco esse trabalho?',
         answer: firstSteps.join(' '),
       },
-      {
-        question: 'O que pode me fazer perder pontos?',
-        answer: gradingTips.length > 0
-          ? `Fique atento principalmente a: ${gradingTips.join('; ')}.`
-          : 'Os criterios de perda de pontos nao ficaram totalmente objetivos no material salvo, entao vale conferir o anexo principal.',
-      },
     ],
-    simpleConcepts: [
+    learningTopics: [
       {
-        title: 'Como entender a atividade',
-        content: overview,
+        title: 'Entenda o objetivo central',
+        explanation: cleanLearningSentence(overview)
+          || `Leia o enunciado de ${topic.title} pensando no resultado final que a atividade quer avaliar.`,
+        commonDifficulty: deliverables.length > 0
+          ? 'Muita gente mistura objetivo da atividade com a lista de arquivos que precisa enviar.'
+          : 'Muita gente tenta começar pelo arquivo sem antes entender o que precisa demonstrar na atividade.',
+        studyStrategy: `Resuma em uma frase o objetivo do trabalho e depois confira onde cada parte aparece no enunciado.`,
       },
       {
-        title: 'O que entregar na pratica',
-        content: deliverables.length > 0
-          ? `Pense nessa atividade como uma entrega composta por: ${deliverables.join(', ')}.`
-          : 'Comece identificando os arquivos e formatos exigidos no enunciado principal.',
+        title: 'Separe o que precisa ser entregue',
+        explanation: deliverables.length > 0
+          ? `Organize a entrega em partes claras: ${deliverables.join(', ')}.`
+          : 'Antes de produzir qualquer coisa, marque no enunciado quais arquivos, formatos e evidencias precisam ser enviados.',
+        commonDifficulty: 'Um erro comum e deixar para descobrir o formato ou o arquivo final so no fim da execucao.',
+        studyStrategy: deliverables.length > 0
+          ? `Monte uma checklist simples com ${deliverables.join(', ')} e valide cada item antes de enviar.`
+          : 'Monte uma checklist curta com arquivos, formato e local de envio antes de executar o trabalho.',
       },
       {
-        title: 'Como resolver sem se perder',
-        content: firstSteps.join(' '),
-      },
-      {
-        title: 'Cuidados importantes',
-        content: gradingTips.length > 0
-          ? gradingTips.join(' ')
-          : 'Revise o enunciado, confirme formato, prazo e regras da submissao antes de enviar.',
+        title: 'Evite retrabalho e perda de pontos',
+        explanation: gradingTips.length > 0
+          ? `Os pontos de atencao principais aqui sao: ${gradingTips.join(', ')}.`
+          : 'Os detalhes finos de submissao e avaliacao precisam ser conferidos no enunciado principal antes do envio.',
+        commonDifficulty: 'A parte que mais confunde costuma ser esquecer regra de submissao, formato ou requisito individual do grupo.',
+        studyStrategy: 'Reserve a revisao final para conferir nomes, formato e regras da entrega.',
       },
     ],
     quickTips: dedupeStrings([
       deliverables.length > 0 ? `Separe cedo os arquivos pedidos: ${deliverables.join(', ')}.` : '',
-      deadline === 'Data nao identificada no material.' ? 'Confirme a data no PDF principal para nao depender so do resumo.' : `Anote a data ${deadline} para nao perder o prazo.`,
       gradingTips[0] ?? '',
     ].filter(Boolean)).slice(0, 3),
   } satisfies TopicLearning
+}
+
+function buildLearningPrompt(topic: SubjectTopic, memory: TopicAgentMemory) {
+  const deliverables = collectHumanDeliverables(topic, memory)
+  const snippets = dedupeStrings([
+    ...memory.sourceSnippets,
+    ...findRelevantSnippets(topic.contentText, 'objetivo entrega avaliacao dificuldade alunos formato checklist', 6),
+  ])
+    .slice(0, 6)
+    .map((item, index) => `[${index + 1}] ${item}`)
+    .join('\n')
+
+  return [
+    'Voce e um analista pedagogico do FIAPAUTO.',
+    'Sua tarefa e transformar uma atividade academica em uma aba de aprendizado limpa, didatica e realmente util para estudantes.',
+    'Pense nos topicos mais relevantes para aprender, nas dificuldades que alunos costumam ter e em como explicar cada ponto de maneira simples e pratica.',
+    'Ignore completamente ruido administrativo e metadados crus.',
+    'Nunca trate como conceito os seguintes elementos: links, status, curso, modulo, nomes de arquivos, extensoes como .pdf/.docx/.xlsx, cabecalhos administrativos, texto repetido do resumo.',
+    'Nao copie linhas do resumo literalmente. Reescreva com linguagem humana, curta e clara.',
+    'Responda somente em JSON valido.',
+    'Use exatamente este schema:',
+    '{"frequentQuestions":[{"question":"string","answer":"string"}],"learningTopics":[{"title":"string","explanation":"string","commonDifficulty":"string","studyStrategy":"string"}],"quickTips":["string"]}',
+    'Regras obrigatorias:',
+    '- frequentQuestions: 2 ou 3 itens, perguntas curtas e objetivas.',
+    '- learningTopics: 2 ou 3 itens, cada item com foco pedagogico real.',
+    '- quickTips: 1 a 3 dicas curtas e acionaveis.',
+    '- Se algo nao estiver claro no material, diga isso com honestidade sem inventar.',
+    '- Escreva em portugues do Brasil.',
+    '- Tom didatico, objetivo e clean.',
+    '',
+    `Titulo: ${topic.title}`,
+    `Curso: ${topic.course || 'Nao identificado'}`,
+    '',
+    'Resumo atual:',
+    topic.summary || 'Nao existe resumo salvo.',
+    '',
+    'Memoria atual do agente:',
+    memory.overview || 'Nao existe overview salvo.',
+    '',
+    `Entregaveis detectados: ${deliverables.join(' | ') || 'Nao identificados'}`,
+    `Fatos importantes: ${memory.keyFacts.join(' | ') || 'Nenhum'}`,
+    '',
+    'Trechos relevantes do material:',
+    snippets || 'Nenhum trecho relevante recuperado.',
+  ].join('\n')
+}
+
+function buildLearningDocuments(topic: SubjectTopic, memory: TopicAgentMemory) {
+  const snippets = dedupeStrings([
+    ...memory.sourceSnippets,
+    ...findRelevantSnippets(topic.contentText, 'objetivo entrega dificuldade avaliacao grupo submissao formato', 8),
+  ]).slice(0, 8)
+
+  return [
+    {
+      name: `${topic.id}.learning-context.txt`,
+      content: [
+        `titulo: ${topic.title}`,
+        `curso: ${topic.course || 'nao identificado'}`,
+        `resumo: ${topic.summary || 'nao existe resumo salvo'}`,
+        `overview: ${memory.overview || 'nao existe overview salvo'}`,
+        `entregaveis: ${memory.deliverables.join(' | ') || 'nenhum detectado'}`,
+        `key_facts: ${memory.keyFacts.join(' | ') || 'nenhum detectado'}`,
+        '',
+        'snippets:',
+        ...snippets,
+      ].join('\n'),
+    },
+  ]
+}
+
+function parseLearningPayload(raw: string) {
+  const trimmed = raw.trim()
+  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  const candidate = fencedMatch?.[1] ?? trimmed
+
+  try {
+    const parsed = JSON.parse(candidate) as unknown
+    return normalizeTopicLearning(parsed)
+  } catch {
+    return null
+  }
 }
 
 function buildDeterministicSummary(topic: SubjectTopic) {
@@ -1141,7 +1417,6 @@ function buildDeterministicSummary(topic: SubjectTopic) {
   return [
     `Objetivo: ${topic.title}.`,
     `Entregaveis: ${deliverables.join('; ') || 'Nao foi encontrado.'}`,
-    `Prazo: ${topic.dueText || 'Nao foi encontrado.'}`,
     `Curso: ${topic.course || 'Nao identificado'}. Status: ${topic.status}.`,
     'Pontos de atencao: consulte os anexos e a screenshot da atividade para confirmar os detalhes.',
   ].join('\n')
@@ -1151,12 +1426,6 @@ function collectDeliverables(topic: SubjectTopic) {
   const fromFiles = topic.attachments.map((item) => `Arquivo "${item.name}"`)
   const fromText = findRelevantSnippets(topic.contentText, 'entrega entregavel arquivo anexar enviar', 4)
   return dedupeStrings([...fromFiles, ...fromText]).slice(0, 6)
-}
-
-function collectDeadlines(topic: SubjectTopic) {
-  return dedupeStrings(
-    [topic.dueText, ...findRelevantSnippets(topic.contentText, 'prazo entrega data deadline', 4)].filter(Boolean),
-  ).slice(0, 4)
 }
 
 function collectHumanDeliverables(topic: SubjectTopic, memory: TopicAgentMemory) {
@@ -1218,7 +1487,6 @@ function collectPenaltyLearningTips(topic: SubjectTopic, memory: TopicAgentMemor
   }
 
   if (/atraso superior a 15 minutos|15 minutos ap[oó]s/i.test(candidates)) {
-    tips.push('evite entregar com atraso')
   }
 
   if (/nota zero|aus[eê]ncia na oral|aus[eê]ncia de qualquer membro/i.test(candidates)) {
@@ -1239,16 +1507,13 @@ function collectPenaltyLearningTips(topic: SubjectTopic, memory: TopicAgentMemor
 function buildLearningFirstSteps(
   topic: SubjectTopic,
   deliverables: string[],
-  deadline: string,
 ) {
   return [
     `Primeiro, entenda o objetivo central de ${topic.title} pelo resumo do trabalho.`,
     deliverables.length > 0
       ? `Depois, monte uma checklist com ${deliverables.join(', ')}.`
       : 'Depois, abra o anexo principal e anote os entregaveis e formatos exigidos.',
-    deadline === 'Data nao identificada no material.'
-      ? 'Por fim, confirme manualmente a data no PDF principal antes de enviar.'
-      : `Por fim, organize a execucao para concluir tudo antes de ${deadline}.`,
+    'Por fim, revise nomes, formato e regras de submissao antes de enviar.',
   ]
 }
 
@@ -1288,6 +1553,32 @@ function computeSimilarity(source: string, question: string) {
   return hits / questionTokens.length
 }
 
+function computeGroundingScore(answer: string, citations: TopicCitation[]) {
+  if (citations.length === 0) {
+    return 0
+  }
+
+  const citationCoverage = Math.min(citations.length, 3) / 3
+  const strongestOverlap = Math.max(
+    ...citations.map((citation) => computeSimilarity(`${citation.sourceLabel} ${citation.snippet}`, answer)),
+    0,
+  )
+  const averageOverlap = citations.reduce(
+    (total, citation) => total + computeSimilarity(`${citation.sourceLabel} ${citation.snippet}`, answer),
+    0,
+  ) / citations.length
+
+  return Math.min(1, citationCoverage * 0.55 + strongestOverlap * 0.3 + averageOverlap * 0.15)
+}
+
+function hashText(text: string) {
+  let hash = 0
+  for (let index = 0; index < text.length; index += 1) {
+    hash = (hash * 31 + text.charCodeAt(index)) >>> 0
+  }
+  return hash.toString(16)
+}
+
 function tokenize(value: string) {
   return value
     .toLowerCase()
@@ -1319,22 +1610,6 @@ function cleanSummaryValue(value: string) {
     .replace(/^Prazo de entrega às?\s*/i, '')
     .replace(/^Prazo de entrega\s*/i, '')
     .trim()
-}
-
-function extractDateOnly(value: string | undefined) {
-  const source = value?.trim()
-  if (!source) {
-    return ''
-  }
-
-  const numeric = source.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/)
-  if (!numeric) {
-    return ''
-  }
-
-  const [, day, month, year] = numeric
-  const fullYear = year!.length === 2 ? `20${year}` : year!
-  return `${day!.padStart(2, '0')}/${month!.padStart(2, '0')}/${fullYear}`
 }
 
 function capitalizeLabel(value: string) {
@@ -1375,6 +1650,175 @@ function dedupeFaq(items: TopicFaqItem[]) {
   })
 }
 
+function sanitizeTopicLearning(learning: TopicLearning): TopicLearning {
+  const frequentQuestions = dedupeFaq(
+    (learning.frequentQuestions ?? [])
+      .map((item) => ({
+        question: cleanLearningQuestion(item.question),
+        answer: cleanLearningSentence(item.answer, 220),
+      }))
+      .filter((item) => item.question && item.answer),
+  ).slice(0, 3)
+
+  const learningTopics = dedupeLearningTopics(
+    (learning.learningTopics ?? [])
+      .map((item) => ({
+        title: cleanLearningTitle(item.title),
+        explanation: cleanLearningSentence(item.explanation, 240),
+        commonDifficulty: cleanLearningSentence(item.commonDifficulty, 180),
+        studyStrategy: cleanLearningSentence(item.studyStrategy, 180),
+      }))
+      .filter((item) => item.title && item.explanation && item.commonDifficulty && item.studyStrategy),
+  ).slice(0, 3)
+
+  const quickTips = dedupeStrings(
+    (learning.quickTips ?? [])
+      .map((item) => cleanLearningSentence(item, 120))
+      .filter(Boolean),
+  ).slice(0, 3)
+
+  return {
+    frequentQuestions,
+    learningTopics,
+    quickTips,
+  }
+}
+
+function dedupeLearningTopics(items: TopicLearningTopic[]) {
+  const seen = new Set<string>()
+  return items.filter((item) => {
+    const key = normalizeLearningKey(`${item.title}|${item.explanation}|${item.commonDifficulty}|${item.studyStrategy}`)
+    if (!key || seen.has(key)) {
+      return false
+    }
+
+    seen.add(key)
+    return true
+  })
+}
+
+function normalizeTopicLearning(value: unknown): TopicLearning | null {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+
+  const item = value as Partial<TopicLearning> & {
+    simpleConcepts?: TopicLearningConcept[]
+  }
+  const legacyTopics = Array.isArray(item.simpleConcepts)
+    ? item.simpleConcepts
+        .map((concept) => ({
+          title: cleanLearningTitle(concept.title),
+          explanation: cleanLearningSentence(concept.content, 240),
+          commonDifficulty: buildLegacyDifficulty(concept.title),
+          studyStrategy: buildLegacyStudyStrategy(concept.title),
+        }))
+        .filter((concept) => concept.title && concept.explanation)
+    : []
+  const learningTopics = Array.isArray(item.learningTopics) ? item.learningTopics : legacyTopics
+  const learning = {
+    frequentQuestions: Array.isArray(item.frequentQuestions) ? item.frequentQuestions : [],
+    learningTopics,
+    quickTips: Array.isArray(item.quickTips) ? item.quickTips : [],
+  } satisfies TopicLearning
+
+  const sanitized = sanitizeTopicLearning(learning)
+  if (
+    sanitized.frequentQuestions.length === 0 &&
+    sanitized.learningTopics.length === 0 &&
+    sanitized.quickTips.length === 0
+  ) {
+    return null
+  }
+
+  return sanitized
+}
+
+function buildLegacyDifficulty(title: string) {
+  if (/entreg|pratica|checklist/i.test(title)) {
+    return 'Normalmente a dificuldade esta em transformar o enunciado em uma lista objetiva do que realmente precisa ser enviado.'
+  }
+
+  if (/cuidado|aten/i.test(title)) {
+    return 'Muita gente deixa as regras de submissao para o final e acaba errando detalhe simples.'
+  }
+
+  return 'Uma dificuldade comum e entender o que esse ponto quer dizer na pratica dentro da atividade.'
+}
+
+function buildLegacyStudyStrategy(title: string) {
+  if (/entreg|pratica/i.test(title)) {
+    return 'Converta esse ponto em checklist e valide item por item antes de enviar.'
+  }
+
+  if (/cuidado|aten/i.test(title)) {
+    return 'Use esse ponto como etapa final de revisao antes da submissao.'
+  }
+
+  return 'Reescreva esse ponto com suas palavras e conecte a explicacao com o trecho correspondente do enunciado.'
+}
+
+function cleanLearningQuestion(value: string) {
+  const cleaned = cleanLearningSentence(value, 90)
+  if (!cleaned) {
+    return ''
+  }
+
+  return cleaned.endsWith('?') ? cleaned : `${cleaned}?`
+}
+
+function cleanLearningTitle(value: string) {
+  const cleaned = cleanLearningText(value, 60)
+  if (!cleaned) {
+    return ''
+  }
+
+  return cleaned
+    .replace(/[.:;,-]+$/g, '')
+    .trim()
+}
+
+function cleanLearningSentence(value: string, maxLength = 180) {
+  const cleaned = cleanLearningText(value, maxLength)
+  if (!cleaned) {
+    return ''
+  }
+
+  return cleaned.replace(/[;,:-]+$/g, '').trim()
+}
+
+function cleanLearningText(value: string, maxLength: number) {
+  const collapsed = value.replace(/\s+/g, ' ').trim()
+  if (!collapsed || collapsed.length < 8 || collapsed.length > maxLength) {
+    return ''
+  }
+
+  if (isLearningNoise(collapsed)) {
+    return ''
+  }
+
+  return collapsed
+}
+
+function isLearningNoise(value: string) {
+  const normalized = normalizeLearningKey(value)
+
+  return (
+    /(teams\.microsoft|status:|curso:|link de detalhe|arquivos baixados|modulo sugerido|titulo:)/i.test(normalized) ||
+    /\.(pdf|docx|xlsx|pptx|zip|rar|py)\b/i.test(normalized) ||
+    /(nao existe resumo salvo|nao existe overview salvo|nenhum detectado)/i.test(normalized)
+  )
+}
+
+function normalizeLearningKey(value: string) {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 function sanitizeTopicMemory(memory: TopicAgentMemory) {
   return {
     ...memory,
@@ -1382,7 +1826,7 @@ function sanitizeTopicMemory(memory: TopicAgentMemory) {
       memory.faq.filter((item) => isUsefulQuestion(item.question) && isQuestionAnswerSafeForReuse(item.question, item.answer)),
     ).slice(0, 10),
     deliverables: dedupeStrings(memory.deliverables.filter((item) => item.trim().length >= 12)).slice(0, 6),
-    deadlines: dedupeStrings(memory.deadlines.filter((item) => item.trim().length >= 8)).slice(0, 6),
+    deadlines: [],
     keyFacts: dedupeStrings(
       memory.keyFacts.filter(
         (item) =>
@@ -1497,19 +1941,6 @@ function isTopicMemory(value: unknown): value is TopicAgentMemory {
     typeof item.answerStyle === 'string' &&
     typeof item.fallbackPolicy === 'string' &&
     Array.isArray(item.sourceSnippets)
-  )
-}
-
-function isTopicLearning(value: unknown): value is TopicLearning {
-  if (!value || typeof value !== 'object') {
-    return false
-  }
-
-  const item = value as Partial<TopicLearning>
-  return (
-    Array.isArray(item.frequentQuestions) &&
-    Array.isArray(item.simpleConcepts) &&
-    Array.isArray(item.quickTips)
   )
 }
 

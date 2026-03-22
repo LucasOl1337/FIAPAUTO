@@ -1,10 +1,16 @@
 import type { SubjectTopic, TopicAgentMemory } from './subjectTopics.ts'
-import { searchKnowledgeChunks, type KnowledgeChunk } from './knowledgeWarehouse.ts'
+import type { LibraryMatch, LibrarySourceType } from '../apis/contracts/index.ts'
+import {
+  searchKnowledgeChunks,
+  searchKnowledgeLibrary,
+  toLibraryMatch,
+  type KnowledgeChunk,
+} from './knowledgeWarehouse.ts'
 import { classifyQuestionIntent, type QuestionIntent } from './questionIntentClassifier.ts'
 import type { ConversationState } from './conversationStateStore.ts'
 
 export type TopicCitation = {
-  sourceType: 'summary' | 'faq' | 'deadline' | 'deliverable' | 'content'
+  sourceType: 'summary' | 'faq' | 'deliverable' | 'content'
   sourceLabel: string
   snippet: string
 }
@@ -13,11 +19,28 @@ export type TopicContextBundle = {
   intent: QuestionIntent
   documents: Array<{ name: string; content: string }>
   citations: TopicCitation[]
+  localCitations: TopicCitation[]
+  libraryCitations: TopicLibraryCitation[]
   keyFacts: string[]
-  deadlineHints: string[]
   deliverableHints: string[]
   numberedHints: string[]
   conversationSummary: string
+  libraryMatches: LibraryMatch[]
+  libraryDecision: TopicLibraryDecision
+}
+
+export type TopicLibraryCitation = {
+  sourceType: LibrarySourceType
+  sourceLabel: string
+  snippet: string
+}
+
+export type TopicLibraryDecision = {
+  question: string
+  summary: string
+  considered: number
+  accepted: number
+  rejected: number
 }
 
 export async function buildTopicContextBundle(input: {
@@ -29,7 +52,6 @@ export async function buildTopicContextBundle(input: {
   const intent = classifyQuestionIntent(input.question)
   const preferredSourceTypes = mapIntentToPreferredSourceTypes(intent)
   const keyFacts = selectKeyFacts(input.memory, intent)
-  const deadlineHints = selectHints(input.memory.deadlines, intent === 'numbered_item' ? 1 : 4)
   const deliverableHints = selectHints(input.memory.deliverables, intent === 'numbered_item' ? 1 : 4)
   const searchResults = await searchKnowledgeChunks({
     query: input.question,
@@ -37,9 +59,48 @@ export async function buildTopicContextBundle(input: {
     preferredSourceTypes,
     limit: 4,
   })
-
-  const citations = buildCitations(input.topic, input.memory, searchResults.map((item) => item.chunk), intent)
+  const localCitations = buildCitations(input.topic, input.memory, searchResults.map((item) => item.chunk), intent)
   const numberedHints = findNumberedHints(input.topic, input.memory, input.question)
+  const rawLibraryResults = await searchKnowledgeLibrary({
+    query: input.question,
+    currentTopicId: input.topic.id,
+    currentTopicTitle: input.topic.title,
+    currentModuleKey: input.topic.moduleKey,
+    currentDeliverables: input.memory.deliverables,
+    intent,
+    limit: 5,
+  })
+  const minimumScore = intent === 'deliverable' || intent === 'grading' || intent === 'format'
+    ? 9
+    : intent === 'explanation' || intent === 'next_steps'
+      ? 7
+      : 8
+  const libraryMatches = rawLibraryResults.map((result) => {
+    const accepted = result.score >= minimumScore
+    const reason = accepted
+      ? result.entry.sourceType === 'official_chunk'
+        ? 'Aceito: caso parecido com base oficial forte.'
+        : result.entry.sourceType === 'validated_answer'
+          ? 'Aceito: resposta validada com grounding suficiente.'
+          : 'Aceito: padrao didatico parecido para explicar o trabalho.'
+      : `Descartado: score abaixo do limiar minimo (${minimumScore}).`
+    return toLibraryMatch(result, accepted, reason)
+  })
+  const acceptedLibraryMatches = libraryMatches.filter((item) => item.usedInAnswer).slice(0, 2)
+  const libraryCitations = acceptedLibraryMatches.map((item) => ({
+    sourceType: item.sourceType,
+    sourceLabel: `${item.topicTitle} (${item.sourceType})`,
+    snippet: item.snippet,
+  })) satisfies TopicLibraryCitation[]
+  const libraryDecision = {
+    question: input.question,
+    summary: acceptedLibraryMatches.length > 0
+      ? 'Biblioteca usada como apoio para explicar casos parecidos sem substituir a base local.'
+      : 'Biblioteca ignorada para esta pergunta porque nao atingiu confianca suficiente.',
+    considered: libraryMatches.length,
+    accepted: acceptedLibraryMatches.length,
+    rejected: Math.max(0, libraryMatches.length - acceptedLibraryMatches.length),
+  } satisfies TopicLibraryDecision
   const documents = [
     {
       name: `${input.topic.id}.summary.txt`,
@@ -50,16 +111,26 @@ export async function buildTopicContextBundle(input: {
       content: JSON.stringify({
         overview: input.memory.overview,
         deliverables: input.memory.deliverables,
-        deadlines: input.memory.deadlines,
         keyFacts,
         faq: intent === 'numbered_item' ? [] : input.memory.faq.filter((item) => isGroundedFaq(item, intent)).slice(0, 4),
       }),
     },
     {
       name: `${input.topic.id}.context.txt`,
-      content: [...citations.map((item) => `${item.sourceType}: ${item.snippet}`), ...numberedHints.map((item) => `numbered: ${item}`)].join('\n'),
+      content: [...localCitations.map((item) => `${item.sourceType}: ${item.snippet}`), ...numberedHints.map((item) => `numbered: ${item}`)].join('\n'),
     },
   ]
+
+  if (acceptedLibraryMatches.length > 0) {
+    documents.push({
+      name: `${input.topic.id}.library.txt`,
+      content: [
+        'Casos parecidos da biblioteca global. Use apenas como apoio de explicacao.',
+        'Nunca trate isso como fato confirmado do topico atual sem confirmacao nas fontes locais.',
+        ...acceptedLibraryMatches.map((item, index) => `${index + 1}. ${item.topicTitle} [${item.sourceType}] ${item.question ? `Pergunta: ${item.question}. ` : ''}${item.snippet}`),
+      ].join('\n'),
+    })
+  }
 
   if (input.conversation?.summary) {
     documents.push({
@@ -71,12 +142,15 @@ export async function buildTopicContextBundle(input: {
   return {
     intent,
     documents,
-    citations,
+    citations: localCitations,
+    localCitations,
+    libraryCitations,
     keyFacts,
-    deadlineHints,
     deliverableHints,
     numberedHints,
     conversationSummary: input.conversation?.summary ?? '',
+    libraryMatches,
+    libraryDecision,
   } satisfies TopicContextBundle
 }
 
@@ -106,14 +180,6 @@ function buildCitations(
     }
   }
 
-  for (const deadline of memory.deadlines.slice(0, intent === 'deadline' ? 2 : 1)) {
-    citations.push({
-      sourceType: 'deadline',
-      sourceLabel: 'Prazo identificado',
-      snippet: deadline.slice(0, 220),
-    })
-  }
-
   for (const deliverable of memory.deliverables.slice(0, intent === 'deliverable' ? 2 : 1)) {
     citations.push({
       sourceType: 'deliverable',
@@ -134,10 +200,6 @@ function buildCitations(
 }
 
 function mapIntentToPreferredSourceTypes(intent: QuestionIntent) {
-  if (intent === 'deadline') {
-    return ['deadline', 'summary', 'content'] satisfies KnowledgeChunk['sourceType'][]
-  }
-
   if (intent === 'deliverable') {
     return ['deliverable', 'summary', 'content'] satisfies KnowledgeChunk['sourceType'][]
   }
@@ -156,10 +218,6 @@ function mapIntentToPreferredSourceTypes(intent: QuestionIntent) {
 function mapChunkSourceType(
   sourceType: KnowledgeChunk['sourceType'],
 ): TopicCitation['sourceType'] {
-  if (sourceType === 'deadline') {
-    return 'deadline'
-  }
-
   if (sourceType === 'deliverable') {
     return 'deliverable'
   }

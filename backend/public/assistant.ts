@@ -1,11 +1,41 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { runtimePaths } from '../config/runtimePaths.ts'
-import { routeAssistantChat } from '../connections/llm/providerRouter.ts'
-import { classifyQuestionIntent } from '../engine/questionIntentClassifier.ts'
+import { routeAssistantChat, type ProviderChatResponse } from '../connections/llm/providerRouter.ts'
+import { classifyQuestionIntent, type QuestionIntent } from '../engine/questionIntentClassifier.ts'
 import type { PublicChatResponse, PublicTopic, PublishedKnowledgeChunk } from '../apis/contracts/index.ts'
 
 type Citation = PublicChatResponse['citations'][number]
+
+type ParsedStructuredAnswer = {
+  direct: string
+  deliverables: string[]
+  deadline: string[]
+  attention: string[]
+  nextSteps: string[]
+  extra: string[]
+}
+
+type QualityEvaluation = {
+  accepted: boolean
+  reason: string
+  missingSections: string[]
+}
+
+type DeterministicPackage = {
+  answer: string
+  deliverables: string[]
+  deadline: string[]
+  attention: string[]
+  nextSteps: string[]
+}
+
+type ToolUsageContext = {
+  toolLabel: string
+  toolKey: string
+  hasMentionInContext: boolean
+  hasExplicitRequirement: boolean
+}
 
 export async function answerPublishedTopicQuestion(input: {
   topic: PublicTopic
@@ -20,22 +50,24 @@ export async function answerPublishedTopicQuestion(input: {
     sourceLabel: `${input.topic.title} / ${chunk.sourceType}`,
     snippet: chunk.text,
   })) satisfies Citation[]
-
-  const deterministic = buildDeterministicAnswer({
+  const deterministic = buildDeterministicPackage({
     topic: input.topic,
+    question: input.question,
     citations,
     intent,
   })
+  const confidence = citations.length >= 2 ? 'high' : citations.length === 1 ? 'medium' : 'low'
   const prompt = buildPrompt({
     topic: input.topic,
     question: input.question,
     rankedChunks: rankedChunks.slice(0, 6),
+    intent,
   })
   const documents = buildDocuments(input.topic, citations)
   const images = await readTopicImages(input.topic)
 
   try {
-    const providerResponse = await routeAssistantChat({
+    const primary = await routeAssistantChat({
       jobId: `public-topic-ask-${input.topic.id}-${Date.now()}`,
       topicId: input.topic.id,
       prompt,
@@ -43,104 +75,342 @@ export async function answerPublishedTopicQuestion(input: {
       images,
     })
 
-    return {
-      topicId: input.topic.id,
-      answer: providerResponse.answer || deterministic,
-      confidence: citations.length >= 2 ? 'high' : citations.length === 1 ? 'medium' : 'low',
-      strategyUsed: providerResponse.strategyUsed,
-      providerUsed: providerResponse.providerUsed,
-      fallbackLevel: providerResponse.fallbackLevel,
+    const primaryPayload = buildProviderPayload({
+      input,
       citations,
-      suggestedQuestions: buildSuggestedQuestions(intent),
-      nextSteps: buildNextSteps(input.topic),
-      answeredAt: new Date().toISOString(),
-    } satisfies PublicChatResponse
+      confidence,
+      intent,
+      providerResponse: primary,
+      answer: primary.answer,
+      qualityStatus: 'accepted',
+      answeredByPass: 'primary',
+    })
+
+    if (primaryPayload.qualityStatus !== 'accepted') {
+      const retryPrompt = buildRetryPrompt({
+        topic: input.topic,
+        question: input.question,
+        intent,
+        previousAnswer: primary.answer,
+        qualityReason: primaryPayload.qualityReason,
+        missingSections: primaryPayload.missingSections ?? [],
+        rankedChunks: rankedChunks.slice(0, 6),
+      })
+
+      try {
+        const retry = await routeAssistantChat({
+          jobId: `public-topic-ask-retry-${input.topic.id}-${Date.now()}`,
+          topicId: input.topic.id,
+          prompt: retryPrompt,
+          documents,
+          images,
+        })
+
+        const retryPayload = buildProviderPayload({
+          input,
+          citations,
+          confidence,
+          intent,
+          providerResponse: retry,
+          answer: retry.answer,
+          qualityStatus: 'regenerated',
+          answeredByPass: 'retry',
+        })
+
+        if (retryPayload.qualityStatus !== 'fallback') {
+          return retryPayload
+        }
+
+        return buildFallbackPayload({
+          input,
+          citations,
+          confidence,
+          deterministic,
+          reason: retryPayload.qualityReason,
+          missingSections: retryPayload.missingSections,
+        })
+      } catch {
+        return buildFallbackPayload({
+          input,
+          citations,
+          confidence,
+          deterministic,
+          reason: primaryPayload.qualityReason,
+          missingSections: primaryPayload.missingSections,
+        })
+      }
+    }
+
+    return primaryPayload
   } catch {
-    // Fall back to the deterministic response below.
+    return buildFallbackPayload({
+      input,
+      citations,
+      confidence,
+      deterministic,
+      reason: 'A resposta da IA falhou ou ficou insuficiente; usamos o fallback local.',
+    })
+  }
+}
+
+function buildProviderPayload(input: {
+  input: { topic: PublicTopic; question: string }
+  citations: Citation[]
+  confidence: PublicChatResponse['confidence']
+  intent: QuestionIntent
+  providerResponse: ProviderChatResponse
+  answer: string
+  qualityStatus: 'accepted' | 'regenerated'
+  answeredByPass: 'primary' | 'retry'
+}) {
+  const parsed = parseStructuredAnswer(input.answer)
+  const evaluation = evaluateAnswerQuality({
+    question: input.input.question,
+    topic: input.input.topic,
+    intent: input.intent,
+    parsed,
+    citations: input.citations,
+  })
+
+  if (!evaluation.accepted) {
+    return {
+      topicId: input.input.topic.id,
+      answer: input.answer,
+      confidence: input.confidence,
+      strategyUsed: input.providerResponse.strategyUsed,
+      providerUsed: input.providerResponse.providerUsed,
+      fallbackLevel: input.providerResponse.fallbackLevel,
+      citations: input.citations,
+      suggestedQuestions: buildSuggestedQuestions(input.intent),
+      nextSteps: buildActionableSteps({
+        topic: input.input.topic,
+        question: input.input.question,
+        intent: input.intent,
+        citations: input.citations,
+      }),
+      answeredAt: new Date().toISOString(),
+      qualityStatus: 'fallback',
+      qualityReason: evaluation.reason,
+      answeredByPass: input.answeredByPass,
+      missingSections: evaluation.missingSections,
+    } satisfies PublicChatResponse
   }
 
   return {
-    topicId: input.topic.id,
-    answer: deterministic,
-    confidence: citations.length >= 2 ? 'high' : citations.length === 1 ? 'medium' : 'low',
-    strategyUsed: input.topic.agentMemory ? 'memory' : 'deterministic',
-    providerUsed: 'local',
-    fallbackLevel: 2,
-    citations,
-    suggestedQuestions: buildSuggestedQuestions(intent),
-    nextSteps: buildNextSteps(input.topic),
+    topicId: input.input.topic.id,
+    answer: formatStructuredAnswer({
+      direct: parsed.direct,
+      deliverables: parsed.deliverables,
+      deadline: parsed.deadline,
+      attention: parsed.attention,
+      nextSteps: parsed.nextSteps,
+    }),
+    confidence: input.confidence,
+    strategyUsed: input.providerResponse.strategyUsed,
+    providerUsed: input.providerResponse.providerUsed,
+    fallbackLevel: input.providerResponse.fallbackLevel,
+    citations: input.citations,
+    suggestedQuestions: buildSuggestedQuestions(input.intent),
+    nextSteps: parsed.nextSteps.length > 0
+      ? parsed.nextSteps.slice(0, 3)
+      : buildActionableSteps({
+        topic: input.input.topic,
+        question: input.input.question,
+        intent: input.intent,
+        citations: input.citations,
+      }),
     answeredAt: new Date().toISOString(),
+    qualityStatus: input.qualityStatus,
+    qualityReason: evaluation.reason,
+    answeredByPass: input.answeredByPass,
+    missingSections: evaluation.missingSections,
   } satisfies PublicChatResponse
 }
 
-function buildDeterministicAnswer(input: {
-  topic: PublicTopic
+function buildFallbackPayload(input: {
+  input: { topic: PublicTopic; question: string }
   citations: Citation[]
-  intent: ReturnType<typeof classifyQuestionIntent>
+  confidence: PublicChatResponse['confidence']
+  deterministic: DeterministicPackage
+  reason: string
+  missingSections?: string[]
 }) {
+  return {
+    topicId: input.input.topic.id,
+    answer: input.deterministic.answer,
+    confidence: input.confidence,
+    strategyUsed: input.input.topic.agentMemory ? 'memory' : 'deterministic',
+    providerUsed: 'local',
+    fallbackLevel: 2,
+    citations: input.citations,
+    suggestedQuestions: buildSuggestedQuestions(classifyQuestionIntent(input.input.question)),
+    nextSteps: input.deterministic.nextSteps,
+    answeredAt: new Date().toISOString(),
+    qualityStatus: 'fallback',
+    qualityReason: input.reason,
+    answeredByPass: 'local',
+    missingSections: input.missingSections,
+  } satisfies PublicChatResponse
+}
+
+function buildDeterministicPackage(input: {
+  topic: PublicTopic
+  question: string
+  citations: Citation[]
+  intent: QuestionIntent
+}): DeterministicPackage {
+  const deliverables = buildDeliverableItems(input.topic, input.citations)
+  const deadline = buildDeadlineItems(input.topic, input.citations)
+  const attention = buildAttentionItems(input.topic, input.citations).slice(0, 2)
+  const nextSteps = buildActionableSteps({
+    topic: input.topic,
+    question: input.question,
+    intent: input.intent,
+    citations: input.citations,
+  }).slice(0, 3)
+  const direct = buildDirectFallback({
+    topic: input.topic,
+    question: input.question,
+    intent: input.intent,
+    citations: input.citations,
+    deliverables,
+    deadline,
+  })
+
+  return {
+    answer: formatStructuredAnswer({
+      direct,
+      deliverables,
+      deadline,
+      attention,
+      nextSteps,
+    }),
+    deliverables,
+    deadline,
+    attention,
+    nextSteps,
+  }
+}
+
+function buildDirectFallback(input: {
+  topic: PublicTopic
+  question: string
+  intent: QuestionIntent
+  citations: Citation[]
+  deliverables: string[]
+  deadline: string[]
+}) {
+  const normalizedQuestion = normalizeText(input.question)
+  const summaryBase = input.topic.summary || input.topic.agentMemory?.overview || input.citations[0]?.snippet || ''
+  const toolContext = getToolUsageContext({
+    topic: input.topic,
+    citations: input.citations,
+    question: input.question,
+  })
+
   if (input.intent === 'deadline') {
-    return `O prazo principal identificado para ${input.topic.title} e ${input.topic.dueText || 'nao encontrado no material publicado'}.`
+    return input.deadline[0] || 'Nao encontrei um prazo confirmado no material publicado.'
   }
 
   if (input.intent === 'deliverable') {
-    const deliverables = input.topic.agentMemory?.deliverables ?? []
-    return deliverables.length > 0
-      ? `Os entregaveis publicados para ${input.topic.title} sao: ${deliverables.slice(0, 4).join(', ')}.`
-      : 'Os entregaveis nao ficaram totalmente claros no material publicado. Abra o anexo principal para confirmar.'
-  }
-
-  if (input.intent === 'summary') {
-    return input.topic.summary || input.citations[0]?.snippet || `Ainda nao existe resumo publicado para ${input.topic.title}.`
-  }
-
-  if (input.intent === 'next_steps') {
-    return buildNextSteps(input.topic).join(' ')
+    return input.deliverables.length > 0
+      ? `Voce precisa focar nestes entregaveis principais: ${input.deliverables.join(', ')}.`
+      : 'Nao encontrei uma lista fechada de entregaveis no material publicado.'
   }
 
   if (input.intent === 'grading' || input.intent === 'format') {
-    const fact = input.topic.agentMemory?.keyFacts.find((item) => /nota|atraso|abnt|formato|links|avali/i.test(item))
-    return fact || input.citations[0]?.snippet || 'Nao encontrei uma regra objetiva sobre avaliacao no material publicado.'
+    const risk = buildAttentionItems(input.topic, input.citations)[0]
+    return risk || 'Nao encontrei um criterio detalhado, mas ha pontos de atencao importantes no material.'
   }
 
-  if (input.intent === 'numbered_item' && input.citations[0]) {
-    return `O trecho mais relevante que encontrei para esse item foi: ${input.citations[0].snippet}`
+  if (input.intent === 'tool_usage') {
+    if (/\bpython\b|\br\b|\bcodigo\b|\bscript\b|\bexcel\b|\bplanilha\b/.test(normalizedQuestion)) {
+      if (toolContext.hasExplicitRequirement) {
+        return `${toolContext.toolLabel} aparece no material como parte exigida ou claramente solicitada neste trabalho. Use essa ferramenta sem perder o foco no entregavel final.`
+      }
+
+      if (toolContext.hasMentionInContext) {
+        return `${toolContext.toolLabel} aparece no contexto da disciplina, mas nao foi exigido explicitamente neste checkpoint. Se quiser usar, trate isso como apoio opcional para organizar, limpar ou analisar os dados antes de montar os entregaveis oficiais.`
+      }
+
+      return `${toolContext.toolLabel} nao foi exigido explicitamente no material de ${input.topic.title}. Se quiser usar, trate isso como apoio opcional para organizar, limpar ou analisar os dados antes de montar os entregaveis oficiais.`
+    }
+  }
+
+  if (input.intent === 'next_steps' || input.intent === 'explanation' || input.intent === 'unknown') {
+    if (/\bpython\b|\br\b|\bcodigo\b|\bscript\b/.test(normalizedQuestion)) {
+      return input.citations.some((item) => /\bpython\b|\br\b|\bcodigo\b|\bscript\b/i.test(item.snippet))
+        ? input.citations[0]?.snippet || 'Encontrei referencia pratica no material e vou te direcionar pelo que esta publicado.'
+        : `Nao encontrei no material nenhuma etapa obrigatoria de programacao para ${input.topic.title}. O foco publicado parece estar mais nos entregaveis e nas validacoes finais.`
+    }
+
+    if (summaryBase) {
+      return `Para fazer ${input.topic.title} sem se enrolar, foque primeiro no objetivo central e siga uma sequencia curta de execucao.`
+    }
+  }
+
+  if (input.intent === 'summary' || input.intent === 'greeting') {
+    return summaryBase || `Vou te ajudar com ${input.topic.title} pelo ponto mais util do material publicado.`
   }
 
   return input.citations[0]?.snippet
-    || input.topic.agentMemory?.overview
-    || input.topic.summary
-    || `Posso te ajudar com ${input.topic.title}. Pergunte sobre prazo, entregaveis ou checklist para eu ser mais objetivo.`
+    || summaryBase
+    || `Vou te responder pelo que esta publicado em ${input.topic.title}.`
 }
 
 function buildPrompt(input: {
   topic: PublicTopic
   question: string
   rankedChunks: PublishedKnowledgeChunk[]
+  intent: QuestionIntent
 }) {
-  const learningFaq = (input.topic.learning?.frequentQuestions ?? [])
+  const normalizedLearning = normalizeLearning(input.topic.learning)
+  const learningFaq = (normalizedLearning?.frequentQuestions ?? [])
     .slice(0, 4)
     .map((item) => `- ${item.question}: ${item.answer}`)
+    .join('\n')
+  const learningTopics = (normalizedLearning?.learningTopics ?? [])
+    .slice(0, 3)
+    .map((item) => `- ${item.title}: ${item.explanation} Dificuldade comum: ${item.commonDifficulty} Estrategia: ${item.studyStrategy}`)
+    .join('\n')
+  const quickTips = (normalizedLearning?.quickTips ?? [])
+    .slice(0, 4)
+    .map((item) => `- ${item}`)
     .join('\n')
   const keyFacts = (input.topic.agentMemory?.keyFacts ?? [])
     .slice(0, 8)
     .map((item) => `- ${item}`)
     .join('\n')
+  const deadlineFacts = (input.topic.agentMemory?.deadlines ?? [])
+    .slice(0, 4)
+    .map((item) => `- ${item}`)
+    .join('\n')
   const chunkBlock = input.rankedChunks
     .map((chunk, index) => `[${index + 1}] ${chunk.sourceType}: ${chunk.text}`)
     .join('\n\n')
+  const toolContext = getToolUsageContext({
+    topic: input.topic,
+    citations: input.rankedChunks.slice(0, 6).map((chunk) => ({
+      sourceType: chunk.sourceType === 'overview' ? 'summary' : chunk.sourceType,
+      sourceLabel: `${input.topic.title} / ${chunk.sourceType}`,
+      snippet: chunk.text,
+    })) satisfies Citation[],
+    question: input.question,
+  })
 
   return [
     'Voce e o assistente publico do FIAPAUTO.',
     'Responda em portugues do Brasil, de forma objetiva, natural e util para um aluno cansado e com pressa.',
-    'Use apenas o material fornecido.',
-    'Se algo nao estiver confirmado no material, diga explicitamente que nao encontrou.',
-    'Se as imagens ajudarem, use-as para complementar a resposta.',
+    'A resposta precisa ser autosuficiente: curta, clara e util sem depender de texto extra.',
+    'Use apenas o material fornecido. Se algo nao estiver confirmado, diga explicitamente que nao encontrou.',
+    'Se a pergunta for vaga, pratica ou de ajuda ("como fazer", "nao entendi", "me da uma dica"), transforme isso em orientacao executavel com base no trabalho real.',
+    'Nunca responda so com uma frase vaga, so com uma saudacao, ou so com "nao encontrei".',
     '',
+    `Intencao principal da pergunta: ${input.intent}`,
     `Materia: ${input.topic.title}`,
     `Curso: ${input.topic.course}`,
     `Modulo: ${input.topic.moduleKey}`,
     `Status: ${input.topic.status}`,
-    `Prazo publicado: ${input.topic.dueText || 'nao encontrado'}`,
     '',
     'Resumo publicado:',
     input.topic.summary || 'Nao existe resumo publicado.',
@@ -148,25 +418,96 @@ function buildPrompt(input: {
     'Memoria do agente:',
     input.topic.agentMemory?.overview || 'Nao existe memoria publicada.',
     '',
+    'Entregaveis conhecidos:',
+    (input.topic.agentMemory?.deliverables ?? []).map((item) => `- ${item}`).join('\n') || '- Nenhum entregavel confirmado.',
+    '',
+    'Prazos conhecidos:',
+    deadlineFacts || '- Nenhum prazo confirmado.',
+    '',
     'Fatos importantes:',
     keyFacts || '- Nenhum fato importante publicado.',
     '',
     'FAQ / aprendizado:',
     learningFaq || '- Nenhum FAQ publicado.',
     '',
+    'Topicos de aprendizado:',
+    learningTopics || '- Nenhum topico de aprendizado publicado.',
+    '',
+    'Dicas rapidas:',
+    quickTips || '- Nenhuma dica rapida publicada.',
+    '',
     'Trechos relevantes do material:',
     chunkBlock || 'Nenhum trecho relevante encontrado.',
     '',
     `Pergunta do usuario: ${input.question}`,
     '',
-    'Formato da resposta:',
-    '- Comece respondendo diretamente.',
-    '- Se fizer sentido, traga checklist curto ou proximos passos.',
-    '- Nao invente prazos, entregaveis ou regras.',
+    'Formato obrigatorio da resposta:',
+    'RESPOSTA DIRETA:',
+    'O QUE ENTREGAR:',
+    'PRAZO:',
+    'ATENCAO:',
+    'PROXIMO PASSO:',
+    '',
+    'Regras do formato:',
+    '- Seja curto, concreto e sem floreio.',
+    '- Preencha todos os blocos com algo util.',
+    '- Se um bloco nao tiver informacao confirmada, diga exatamente "Nao encontrei isso no material".',
+    '- Para pergunta pratica, o bloco PROXIMO PASSO deve trazer acao executavel.',
+    '- Nao use markdown, tabela, pipe, asterisco, titulos com # ou texto decorativo.',
+    '- Nao invente dados, regras ou entregaveis.',
+    ...(input.intent === 'tool_usage'
+      ? [
+          '- Esta e uma pergunta de ferramenta/execucao.',
+          `- Primeiro diga claramente se ${toolContext.toolLabel} e obrigatorio, opcional, ou se nao foi exigido explicitamente no material.`,
+          `- Se ${toolContext.toolLabel} aparecer apenas no contexto da disciplina, deixe claro que isso nao significa exigencia deste checkpoint.`,
+          `- Se ${toolContext.toolLabel} nao aparecer no material, nao transforme isso em exigencia.`,
+          `- Explique em 1 ou 2 frases como ${toolContext.toolLabel} pode ajudar opcionalmente dentro deste trabalho sem fugir da entrega real.`,
+          '- O PROXIMO PASSO deve dizer o caminho mais seguro para cumprir a atividade mesmo sem depender da ferramenta.',
+        ]
+      : []),
+  ].join('\n')
+}
+
+function buildRetryPrompt(input: {
+  topic: PublicTopic
+  question: string
+  intent: QuestionIntent
+  previousAnswer: string
+  qualityReason: string
+  missingSections: string[]
+  rankedChunks: PublishedKnowledgeChunk[]
+}) {
+  return [
+    buildPrompt(input),
+    '',
+    'Sua resposta anterior ficou insuficiente.',
+    `Motivo da rejeicao: ${input.qualityReason}`,
+    `Blocos faltando ou fracos: ${input.missingSections.length > 0 ? input.missingSections.join(', ') : 'resposta direta'}`,
+    '',
+    'Agora corrija com estas exigencias extras:',
+    '- Primeiro responda a duvida principal sem enrolar.',
+    '- Se a pergunta pedir dica, caminho, ajuda pratica ou "nao entendi", transforme isso em orientacao de execucao.',
+    '- Se o material nao falar exatamente do termo perguntado, explique isso e redirecione para o que o trabalho realmente exige.',
+    '- Nao diga para consultar documentacao generica.',
+    '- Nao devolva apenas titulo, frase motivacional ou resumo vago.',
+    '- Mantenha os mesmos blocos obrigatorios.',
+    ...(input.intent === 'tool_usage'
+      ? [
+          '- Para pergunta sobre ferramenta, a RESPOSTA DIRETA precisa deixar claro se isso e obrigatorio ou apenas opcional.',
+          '- Se a ferramenta nao estiver no material, diga isso logo na primeira frase.',
+          '- Em seguida, diga como ela poderia ajudar opcionalmente sem mudar os entregaveis oficiais.',
+          '- O PROXIMO PASSO deve ancorar o aluno na entrega real, nao na ferramenta.',
+        ]
+      : []),
+    '',
+    'Resposta anterior ruim:',
+    input.previousAnswer,
   ].join('\n')
 }
 
 function buildDocuments(topic: PublicTopic, citations: Citation[]) {
+  const normalizedLearning = normalizeLearning(topic.learning)
+
   return [
     {
       name: `${topic.id}.summary.txt`,
@@ -184,8 +525,9 @@ function buildDocuments(topic: PublicTopic, citations: Citation[]) {
     {
       name: `${topic.id}.learning.txt`,
       content: JSON.stringify({
-        frequentQuestions: topic.learning?.frequentQuestions ?? [],
-        quickTips: topic.learning?.quickTips ?? [],
+        frequentQuestions: normalizedLearning?.frequentQuestions ?? [],
+        learningTopics: normalizedLearning?.learningTopics ?? [],
+        quickTips: normalizedLearning?.quickTips ?? [],
       }),
     },
     {
@@ -221,24 +563,335 @@ async function readTopicImages(topic: PublicTopic) {
   return images.filter((item): item is NonNullable<typeof item> => Boolean(item))
 }
 
-function buildNextSteps(topic: PublicTopic) {
-  return [
-    `Revise o resumo de ${topic.title}.`,
-    'Abra o anexo principal para confirmar detalhes finos.',
-    `Valide o prazo final: ${topic.dueText || 'nao encontrado'}.`,
-  ]
+function buildDeadlineItems(topic: PublicTopic, citations: Citation[]) {
+  const values = dedupeItems([
+    topic.dueText,
+    ...(topic.agentMemory?.deadlines ?? []).flatMap((item) => extractDeadlineSignals(item)),
+    ...citations
+      .filter((item) => item.sourceType === 'deadline' || /prazo|data|horario|vence|entrega/i.test(item.snippet))
+      .flatMap((item) => extractDeadlineSignals(item.snippet)),
+  ]).filter(Boolean)
+
+  if (values.length > 0) {
+    return values.slice(0, 2)
+  }
+
+  return ['Nao encontrei isso no material']
 }
 
-function buildSuggestedQuestions(intent: ReturnType<typeof classifyQuestionIntent>) {
+function buildDeliverableItems(topic: PublicTopic, citations: Citation[]) {
+  const summaryItems = extractDeliverableSignals(topic.summary || '')
+  const citationItems = citations
+    .filter((item) => item.sourceType === 'deliverable' || /pdf|excel|xlsx|apresenta|formulario|planilha|arquivo/i.test(item.snippet))
+    .flatMap((item) => extractDeliverableSignals(item.snippet))
+
+  const values = dedupeItems([
+    ...(topic.agentMemory?.deliverables ?? []).filter((item) => sanitizeAnswerText(item).length <= 120),
+    ...summaryItems,
+    ...citationItems,
+  ]).filter(Boolean)
+
+  if (values.length > 0) {
+    return values.slice(0, 3)
+  }
+
+  return ['Nao encontrei isso no material']
+}
+
+function buildActionableSteps(input: {
+  topic: PublicTopic
+  question: string
+  intent: QuestionIntent
+  citations: Citation[]
+}) {
+  const steps: string[] = []
+  const normalizedQuestion = normalizeText(input.question)
+  const toolContext = getToolUsageContext({
+    topic: input.topic,
+    citations: input.citations,
+    question: input.question,
+  })
+
+  if (/\bpython\b|\br\b|\bcodigo\b|\bscript\b/.test(normalizedQuestion)) {
+    if (!toolContext.hasExplicitRequirement) {
+      steps.push(`Nao trate ${toolContext.toolLabel} como exigencia agora: primeiro confirme o que realmente foi pedido no trabalho.`)
+      steps.push('Se este checkpoint for o correto, foque nos entregaveis publicados e valide o PDF principal.')
+    }
+  }
+
+  if (input.intent === 'deadline') {
+    steps.push(`Confirme o horario final diretamente no material principal: ${input.topic.dueText || 'nao encontrado'}.`)
+  }
+
+  if (input.intent === 'deliverable') {
+    steps.push('Monte uma checklist curta dos arquivos que precisam ser enviados antes de produzir a versao final.')
+  }
+
+  if (input.intent === 'tool_usage') {
+    if (/\bpython\b|\br\b|\bcodigo\b|\bscript\b/.test(normalizedQuestion)) {
+      steps.push(`Se quiser usar ${toolContext.toolLabel}, use apenas para apoiar a organizacao, limpeza ou analise dos dados antes de montar o arquivo final.`)
+      steps.push('Nao comece codando no escuro: confirme primeiro o entregavel oficial e depois exporte o resultado final no formato pedido.')
+    }
+  }
+
+  if (input.intent === 'next_steps' || input.intent === 'explanation' || input.intent === 'unknown') {
+    steps.push(`Leia o resumo de ${input.topic.title} e transforme o objetivo em 2 ou 3 tarefas praticas.`)
+  }
+
+  steps.push('Abra o anexo principal para validar detalhes finos antes de executar.')
+
+  if ((input.topic.agentMemory?.deliverables ?? []).length > 0) {
+    steps.push(`Prepare primeiro os entregaveis principais: ${input.topic.agentMemory!.deliverables.slice(0, 2).join(' e ')}.`)
+  } else {
+    steps.push('Monte uma checklist curta com entregaveis, formato e validacoes finais.')
+  }
+
+  return dedupeItems(steps).slice(0, 3)
+}
+
+function buildAttentionItems(topic: PublicTopic, citations: Citation[]) {
+  const fromFacts = (topic.agentMemory?.keyFacts ?? [])
+    .filter((item) => /atras|atenc|maximo|zero|abnt|sem|cancela|penalidade|avali|link|nota|erro/i.test(item))
+  if (fromFacts.length > 0) {
+    return fromFacts.slice(0, 3)
+  }
+
+  const fromCitations = citations
+    .map((item) => item.snippet)
+    .filter((item) => /atras|atenc|maximo|zero|abnt|sem|cancela|penalidade|avali|link|nota|erro/i.test(item))
+
+  if (fromCitations.length > 0) {
+    return fromCitations.slice(0, 3)
+  }
+
+  return ['Confirme os detalhes finos no anexo principal antes de entregar.']
+}
+
+function evaluateAnswerQuality(input: {
+  question: string
+  topic: PublicTopic
+  intent: QuestionIntent
+  parsed: ParsedStructuredAnswer
+  citations: Citation[]
+}): QualityEvaluation {
+  const missingSections: string[] = []
+  const combinedDirect = normalizeText(input.parsed.direct)
+  const combinedAll = normalizeText(
+    [input.parsed.direct, ...input.parsed.deliverables, ...input.parsed.deadline, ...input.parsed.attention, ...input.parsed.nextSteps].join(' '),
+  )
+  const hasRelevantContext = Boolean(input.topic.summary || input.topic.agentMemory?.overview || input.citations.length > 0)
+  const directLooksGeneric =
+    !input.parsed.direct
+    || combinedDirect.length < 24
+    || /^oi\b|^ola\b|^teste\b/.test(combinedDirect)
+    || /^posso te ajudar/.test(combinedDirect)
+    || /^nao encontrei isso no material$/.test(combinedDirect)
+    || /^nao encontrei no material/.test(combinedDirect) && hasRelevantContext && input.parsed.nextSteps.length === 0
+
+  if (directLooksGeneric) {
+    missingSections.push('RESPOSTA DIRETA')
+  }
+
+  switch (input.intent) {
+    case 'deliverable':
+      if (input.parsed.deliverables.length === 0 && !/entrega|arquivo|pdf|excel|anexo|nao encontrei/.test(combinedAll)) {
+        missingSections.push('O QUE ENTREGAR')
+      }
+      break
+    case 'deadline':
+      if (input.parsed.deadline.length === 0 && !/prazo|data|horario|entrega|nao encontrei/.test(combinedAll)) {
+        missingSections.push('PRAZO')
+      }
+      break
+    case 'grading':
+    case 'format':
+      if (input.parsed.attention.length === 0 && !/atras|penalidade|erro|abnt|nota|formato|risco|zero/.test(combinedAll)) {
+        missingSections.push('ATENCAO')
+      }
+      break
+    case 'tool_usage':
+    case 'next_steps':
+    case 'explanation':
+    case 'unknown':
+      if (!hasActionableStep(input.parsed.nextSteps) && !/\bfa(ca|ca|zer)|abra|prepare|confirme|ignore|foco|siga|valide|use\b/.test(combinedAll)) {
+        missingSections.push('PROXIMO PASSO')
+      }
+      break
+    case 'summary':
+      if (combinedDirect.length < 60) {
+        missingSections.push('RESPOSTA DIRETA')
+      }
+      break
+    case 'greeting':
+      if (combinedDirect.length < 40 && input.parsed.nextSteps.length === 0) {
+        missingSections.push('RESPOSTA DIRETA')
+      }
+      break
+    default:
+      break
+  }
+
+  if (/\bpython\b|\bcodigo\b|\bscript\b/.test(normalizeText(input.question))) {
+    const toolContext = getToolUsageContext({
+      topic: input.topic,
+      citations: input.citations,
+      question: input.question,
+    })
+    const toolMentionPattern = new RegExp(`\\b${toolContext.toolKey}\\b`, 'i')
+    const mentionsQuestion = toolMentionPattern.test(combinedDirect)
+    const redirectsAction = hasActionableStep(input.parsed.nextSteps)
+    const marksOptionality = new RegExp(`\\b(opcional|obrigatori|nao foi exigid|nao e obrigatori|nao aparece como exigenc|nao encontrei .*${toolContext.toolKey}|${toolContext.toolKey} .*opcional|${toolContext.toolKey} .*nao foi exigid)\\b`, 'i').test(combinedDirect)
+    const explainsPracticalUsage = /\b(organizar|limpar|analisar|consolidar|apoiar|resumir|tratar|usar .* para)\b/.test(combinedAll)
+    const anchorsDeliverable = /\b(entrega|entregavel|pdf|excel|planilha|arquivo|teams|apresenta)\b/.test(combinedAll)
+    const inventsMandatoryUsage = !toolContext.hasExplicitRequirement && /\b(use|instale|roda|rode|aplique)\s+python\b/.test(combinedDirect) && !marksOptionality
+
+    if (!mentionsQuestion || !redirectsAction || !marksOptionality || !explainsPracticalUsage || !anchorsDeliverable || inventsMandatoryUsage) {
+      if (!missingSections.includes('RESPOSTA DIRETA')) {
+        missingSections.push('RESPOSTA DIRETA')
+      }
+      if (!missingSections.includes('PROXIMO PASSO')) {
+        missingSections.push('PROXIMO PASSO')
+      }
+    }
+  }
+
+  return {
+    accepted: missingSections.length === 0,
+    reason:
+      missingSections.length === 0
+        ? 'Resposta validada pela IA.'
+        : `Resposta insuficiente para a intencao ${input.intent}; faltou autosuficiencia em ${missingSections.join(', ')}.`,
+    missingSections,
+  }
+}
+
+function parseStructuredAnswer(answer: string | undefined): ParsedStructuredAnswer {
+  const lines = (answer ?? '')
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  const parsed: ParsedStructuredAnswer = {
+    direct: '',
+    deliverables: [],
+    deadline: [],
+    attention: [],
+    nextSteps: [],
+    extra: [],
+  }
+
+  let currentSection: keyof ParsedStructuredAnswer | null = null
+
+  for (const line of lines) {
+    const sectionMatch = line.match(/^([A-Za-z\s]+):\s*(.*)$/)
+    if (sectionMatch) {
+      const sectionKey = normalizeSectionKey(sectionMatch[1] ?? '')
+      if (sectionKey) {
+        currentSection = sectionKey
+        const inlineValue = sectionMatch[2]?.trim()
+        if (inlineValue) {
+          pushStructuredValue(parsed, sectionKey, inlineValue)
+        }
+        continue
+      }
+    }
+
+    const bulletMatch = line.match(/^[-*]\s+(.+)$/)
+    if (bulletMatch && currentSection) {
+      pushStructuredValue(parsed, currentSection, bulletMatch[1] ?? '')
+      continue
+    }
+
+    if (currentSection) {
+      pushStructuredValue(parsed, currentSection, line)
+      continue
+    }
+
+    const cleaned = sanitizeAnswerText(line)
+    if (cleaned) {
+      parsed.extra.push(cleaned)
+    }
+  }
+
+  if (!parsed.direct) {
+    parsed.direct = parsed.extra[0] || sanitizeAnswerText(answer ?? '')
+  }
+
+  return parsed
+}
+
+function normalizeSectionKey(value: string): keyof ParsedStructuredAnswer | null {
+  const normalized = normalizeText(value)
+
+  if (/^resposta direta|^resumo em 10 segundos|^resumo rapido/.test(normalized)) return 'direct'
+  if (/^o que entregar|^entrega|^entregaveis?/.test(normalized)) return 'deliverables'
+  if (/^prazo|^data/.test(normalized)) return 'deadline'
+  if (/^atencao|^ponto de atencao|^riscos?/.test(normalized)) return 'attention'
+  if (/^proximo passo|^proximos passos|^checklist|^como fazer|^como comecar|^comece assim/.test(normalized)) return 'nextSteps'
+
+  return null
+}
+
+function pushStructuredValue(parsed: ParsedStructuredAnswer, key: keyof ParsedStructuredAnswer, value: string) {
+  const cleaned = sanitizeAnswerText(value)
+  if (!cleaned) {
+    return
+  }
+
+  if (key === 'direct') {
+    parsed.direct = parsed.direct ? `${parsed.direct} ${cleaned}`.trim() : cleaned
+    return
+  }
+
+  const bucket = parsed[key]
+  if (Array.isArray(bucket) && !bucket.includes(cleaned)) {
+    bucket.push(cleaned)
+  }
+}
+
+function formatStructuredAnswer(input: {
+  direct: string
+  deliverables: string[]
+  deadline: string[]
+  attention: string[]
+  nextSteps: string[]
+}) {
+  return [
+    `RESPOSTA DIRETA: ${sanitizeAnswerText(input.direct) || 'Nao encontrei isso no material'}`,
+    `O QUE ENTREGAR: ${formatSectionItems(input.deliverables, 'Nao encontrei isso no material')}`,
+    `PRAZO: ${formatSectionItems(input.deadline, 'Nao encontrei isso no material')}`,
+    `ATENCAO: ${formatSectionItems(input.attention, 'Nao encontrei isso no material')}`,
+    `PROXIMO PASSO: ${formatSectionItems(input.nextSteps, 'Nao encontrei isso no material')}`,
+  ].join('\n')
+}
+
+function formatSectionItems(items: string[], fallback: string) {
+  const visibleItems = dedupeItems(items.map((item) => sanitizeAnswerText(item))).filter(Boolean)
+  if (visibleItems.length === 0) {
+    return fallback
+  }
+
+  return visibleItems.slice(0, 3).map((item) => `- ${item}`).join(' ')
+}
+
+function buildSuggestedQuestions(intent: QuestionIntent) {
+  if (intent === 'deliverable') {
+    return ['Me faca um checklist', 'Qual e o prazo?', 'O que pode me fazer perder pontos?']
+  }
+
   if (intent === 'deadline') {
     return ['O que preciso entregar?', 'Me faca um checklist', 'O que pode me fazer perder pontos?']
   }
 
-  if (intent === 'deliverable') {
-    return ['Qual e o prazo?', 'Explique este trabalho de forma simples', 'Me faca um checklist']
+  if (intent === 'tool_usage') {
+    return ['Isso e obrigatorio ou opcional?', 'Me faca um checklist sem usar codigo', 'Como faco isso sem me perder?']
   }
 
-  return ['O que preciso entregar?', 'Qual e o prazo?', 'Me faca um checklist']
+  if (intent === 'next_steps' || intent === 'explanation' || intent === 'unknown') {
+    return ['Me faca um checklist', 'Explique este trabalho de forma simples', 'O que preciso entregar?']
+  }
+
+  return ['O que preciso entregar?', 'Me faca um checklist', 'O que pode me fazer perder pontos?']
 }
 
 function rankChunks(chunks: PublishedKnowledgeChunk[], question: string) {
@@ -249,8 +902,8 @@ function rankChunks(chunks: PublishedKnowledgeChunk[], question: string) {
       chunk,
       score: tokens.reduce((total, token) => {
         let nextTotal = total
-        if (chunk.text.toLowerCase().includes(token)) nextTotal += 1
-        if (chunk.keywords.includes(token)) nextTotal += 2
+        if (normalizeText(chunk.text).includes(token)) nextTotal += 1
+        if (chunk.keywords.map((item) => normalizeText(item)).includes(token)) nextTotal += 2
         return nextTotal
       }, chunk.sourceType === 'faq' ? 1 : 0),
     }))
@@ -260,11 +913,150 @@ function rankChunks(chunks: PublishedKnowledgeChunk[], question: string) {
 }
 
 function tokenize(value: string) {
+  return normalizeText(value)
+    .split(/[^a-z0-9]+/i)
+    .map((item) => item.trim())
+    .filter((item) => item.length >= 3 || /^\d+$/.test(item))
+}
+
+function normalizeText(value: string) {
   return value
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
-    .split(/[^a-z0-9]+/i)
-    .map((item) => item.trim())
-    .filter((item) => item.length >= 3 || /^\d+$/.test(item))
+}
+
+function sanitizeAnswerText(value: string) {
+  return value
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/__(.+?)__/g, '$1')
+    .replace(/`(.+?)`/g, '$1')
+    .replace(/^>\s*/g, '')
+    .replace(/^#{1,6}\s*/g, '')
+    .replace(/\s*\|\s*/g, ' - ')
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function hasActionableStep(values: string[]) {
+  return values.some((value) => /\b(abra|prepare|valide|monte|revise|confirme|ignore|foco|siga|use|envie|verifique)\b/i.test(value))
+}
+
+function dedupeItems(values: Array<string | undefined>) {
+  const seen = new Set<string>()
+  const items: string[] = []
+
+  for (const value of values) {
+    const cleaned = sanitizeAnswerText(value ?? '')
+    if (!cleaned) {
+      continue
+    }
+
+    const key = normalizeText(cleaned)
+    if (seen.has(key)) {
+      continue
+    }
+
+    seen.add(key)
+    items.push(cleaned)
+  }
+
+  return items
+}
+
+function extractDeliverableSignals(text: string) {
+  const normalized = sanitizeAnswerText(text)
+  const matches = [
+    /apresenta(?:cao|ção).*?pdf/gi,
+    /formulario.*?pdf/gi,
+    /questionario.*?pdf/gi,
+    /pesquisa.*?pdf/gi,
+    /base de dados.*?(?:excel|xlsx)/gi,
+    /planilha.*?(?:excel|xlsx)/gi,
+    /arquivo\s+"[^"]+"/gi,
+  ]
+
+  const results: string[] = []
+  for (const pattern of matches) {
+    const found = normalized.match(pattern) ?? []
+    results.push(...found.map((item) => sanitizeAnswerText(item)))
+  }
+
+  return dedupeItems(results).filter((item) => item.length <= 120)
+}
+
+function extractDeadlineSignals(text: string) {
+  const normalized = sanitizeAnswerText(text)
+  const results: string[] = []
+
+  const timeMatches = normalized.match(/\b(?:ate|até)?\s*(?:as|às)?\s*\d{1,2}:\d{2}\b/gi) ?? []
+  results.push(...timeMatches.map((item) => sanitizeAnswerText(item).replace(/^ate\s+/i, 'Prazo de entrega ').replace(/^até\s+/i, 'Prazo de entrega ')))
+
+  const dateMatches = normalized.match(/\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/gi) ?? []
+  results.push(...dateMatches.map((item) => `Data mencionada: ${item}`))
+
+  return dedupeItems(results).filter((item) => item.length <= 80)
+}
+
+function extractToolLabel(question: string) {
+  const normalized = normalizeText(question)
+  if (/\bpython\b/.test(normalized)) return 'Python'
+  if (/\br\b/.test(normalized)) return 'R'
+  if (/\bexcel\b|\bplanilha\b/.test(normalized)) return 'Excel'
+  if (/\bcodigo\b|\bscript\b/.test(normalized)) return 'codigo'
+  return 'essa ferramenta'
+}
+
+function getToolUsageContext(input: {
+  topic: PublicTopic
+  citations: Citation[]
+  question: string
+}): ToolUsageContext {
+  const toolLabel = extractToolLabel(input.question)
+  const toolKey = normalizeText(toolLabel)
+  const contextualText = normalizeText([
+    input.topic.summary,
+    input.topic.agentMemory?.overview,
+    ...(input.topic.agentMemory?.keyFacts ?? []),
+    ...((normalizeLearning(input.topic.learning)?.learningTopics ?? []).flatMap((item) => [item.title, item.explanation, item.commonDifficulty, item.studyStrategy])),
+    ...((normalizeLearning(input.topic.learning)?.frequentQuestions ?? []).flatMap((item) => [item.question, item.answer])),
+    ...input.citations.map((item) => item.snippet),
+  ].filter(Boolean).join(' '))
+  const requirementText = normalizeText([
+    ...(input.topic.agentMemory?.deliverables ?? []),
+    ...(input.topic.agentMemory?.deadlines ?? []),
+    ...input.citations.map((item) => item.snippet),
+  ].filter(Boolean).join(' '))
+  const mentionPattern = toolKey !== 'essa ferramenta' ? new RegExp(`\\b${toolKey}\\b`, 'i') : null
+  const requirementPattern = toolKey !== 'essa ferramenta'
+    ? new RegExp(`\\b${toolKey}\\b.{0,80}\\b(obrigatori|deve|precisa|use|utilize|script|codigo|program|xlsx|excel|planilha|envie|entreg)`, 'i')
+    : null
+
+  return {
+    toolLabel,
+    toolKey,
+    hasMentionInContext: Boolean(mentionPattern?.test(contextualText)),
+    hasExplicitRequirement: Boolean(requirementPattern?.test(requirementText)),
+  }
+}
+
+function normalizeLearning(learning: PublicTopic['learning']) {
+  if (!learning) {
+    return null
+  }
+
+  const legacyTopics = (learning.simpleConcepts ?? [])
+    .map((item) => ({
+      title: item.title,
+      explanation: item.content,
+      commonDifficulty: 'Uma dificuldade comum e transformar esse texto em execucao pratica.',
+      studyStrategy: 'Use esse ponto como guia e conecte a explicacao com o enunciado antes de agir.',
+    }))
+
+  return {
+    frequentQuestions: learning.frequentQuestions ?? [],
+    learningTopics: learning.learningTopics ?? legacyTopics,
+    quickTips: learning.quickTips ?? [],
+  }
 }

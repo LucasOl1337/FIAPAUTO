@@ -25,6 +25,10 @@ export type PublicTopicChatResult = {
   nextSteps: string[]
   answeredAt: string
   fallbackLevel?: number
+  qualityStatus: 'accepted' | 'regenerated' | 'fallback'
+  qualityReason: string
+  answeredByPass: 'primary' | 'retry' | 'local'
+  missingSections?: string[]
 }
 
 function buildPublicApiUrl(path: string) {

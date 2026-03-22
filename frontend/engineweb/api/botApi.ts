@@ -1,14 +1,18 @@
 import type {
   BotJob,
   BotStatusPayload,
+  LibraryMatch,
   LiveMeeting,
   LlmDebugEvent,
   LlmStatus,
   ReadyLesson,
   SubjectTopic,
+  TopicDebugResult,
   TopicAgentMemory,
   TopicAskResult,
+  TopicLearning,
   TopicSummaryResult,
+  ValidatedAnswerEntry,
 } from '@fiapauto/backend/contracts'
 import type { Lesson, WorkspaceState } from '../types.ts'
 
@@ -32,14 +36,18 @@ function buildAdminHeaders(init?: HeadersInit) {
 
 export type {
   BotJob,
+  LibraryMatch,
   LiveMeeting,
   LlmDebugEvent,
   LlmStatus,
   ReadyLesson,
   SubjectTopic,
+  TopicDebugResult,
   TopicAgentMemory,
   TopicAskResult,
+  TopicLearning,
   TopicSummaryResult,
+  ValidatedAnswerEntry,
 }
 
 export type BotState = {
@@ -197,6 +205,25 @@ export async function generateTopicMemory(topicId: string, force = false) {
   }
 }
 
+export async function generateTopicLearning(topicId: string, force = false) {
+  const response = await fetch(buildApiUrl(`/api/topics/${encodeURIComponent(topicId)}/generate-learning`), {
+    method: 'POST',
+    headers: buildAdminHeaders({
+      'Content-Type': 'application/json',
+    }),
+    body: JSON.stringify({ force }),
+  })
+
+  if (!response.ok) {
+    throw new Error('topic_learning_failed')
+  }
+
+  return (await response.json()) as {
+    topicId: string
+    learning: TopicLearning
+  }
+}
+
 export async function askTopicAssistant(input: { topicId: string; question: string }) {
   const response = await fetch(buildApiUrl(`/api/topics/${encodeURIComponent(input.topicId)}/ask`), {
     method: 'POST',
@@ -222,11 +249,7 @@ export async function fetchTopicDebug(topicId: string) {
     throw new Error('topic_debug_failed')
   }
 
-  return (await response.json()) as {
-    topic: SubjectTopic
-    events: LlmDebugEvent[]
-    llm: LlmStatus
-  }
+  return (await response.json()) as TopicDebugResult
 }
 
 export function buildBotFileUrl(filePath: string) {
@@ -275,6 +298,10 @@ function normalizeTopicAskResult(payload: Partial<TopicAskResult>) {
     citations: Array.isArray(payload.citations) ? payload.citations : [],
     suggestedQuestions: Array.isArray(payload.suggestedQuestions) ? payload.suggestedQuestions : [],
     nextSteps: Array.isArray(payload.nextSteps) ? payload.nextSteps : [],
+    qualityStatus: payload.qualityStatus,
+    qualityReason: payload.qualityReason,
+    answeredByPass: payload.answeredByPass,
+    missingSections: Array.isArray(payload.missingSections) ? payload.missingSections : undefined,
   } satisfies TopicAskResult
 }
 

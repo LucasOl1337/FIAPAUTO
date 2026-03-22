@@ -93,9 +93,17 @@ export type TopicLearningConcept = {
   content: string
 }
 
+export type TopicLearningTopic = {
+  title: string
+  explanation: string
+  commonDifficulty: string
+  studyStrategy: string
+}
+
 export type TopicLearning = {
   frequentQuestions: TopicFaqItem[]
-  simpleConcepts: TopicLearningConcept[]
+  learningTopics: TopicLearningTopic[]
+  simpleConcepts?: TopicLearningConcept[]
   quickTips: string[]
 }
 
@@ -149,6 +157,66 @@ export type TopicAskResult = {
   }>
   suggestedQuestions: string[]
   nextSteps: string[]
+  qualityStatus?: 'accepted' | 'regenerated' | 'fallback'
+  qualityReason?: string
+  answeredByPass?: 'primary' | 'retry' | 'local'
+  missingSections?: string[]
+}
+
+export type LibrarySourceType = 'official_chunk' | 'validated_answer' | 'learning_pattern'
+
+export type LibraryMatch = {
+  id: string
+  sourceType: LibrarySourceType
+  topicId: string
+  topicTitle: string
+  moduleKey: string
+  score: number
+  confidence: 'high' | 'medium' | 'low'
+  usedInAnswer: boolean
+  reason: string
+  snippet: string
+  question?: string
+  citationsCount: number
+  createdAt: string
+}
+
+export type ValidatedAnswerEntry = {
+  id: string
+  topicId: string
+  topicTitle: string
+  moduleKey: string
+  question: string
+  answer: string
+  citations: TopicAskResult['citations']
+  strategyUsed: TopicAskResult['strategyUsed']
+  providerUsed?: TopicAskResult['providerUsed']
+  groundingScore: number
+  sourceSignature: string
+  questionIntent: string
+  createdAt: string
+}
+
+export type TopicDebugResult = {
+  topic: SubjectTopic
+  history: Array<{
+    id: string
+    question: string
+    answer: string
+    usedFallback: boolean
+    answeredAt: string
+  }>
+  events: LlmDebugEvent[]
+  llm: LlmStatus
+  libraryMatches: LibraryMatch[]
+  libraryDecision: {
+    question: string
+    summary: string
+    considered: number
+    accepted: number
+    rejected: number
+  }
+  validatedAnswerCandidates: ValidatedAnswerEntry[]
 }
 
 export type BotStatusPayload = {
@@ -246,6 +314,10 @@ export type PublicChatResponse = {
   suggestedQuestions: string[]
   nextSteps: string[]
   answeredAt: string
+  qualityStatus: 'accepted' | 'regenerated' | 'fallback'
+  qualityReason: string
+  answeredByPass: 'primary' | 'retry' | 'local'
+  missingSections?: string[]
 }
 
 export type PublicSyncStatus = {

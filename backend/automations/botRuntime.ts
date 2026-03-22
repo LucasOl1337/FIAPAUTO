@@ -22,6 +22,7 @@ import { ensureDir, readJsonFile, writeJsonFile } from '../database/fs.ts'
 import { getLlmStatus } from '../engine/assignmentAssistant.ts'
 import {
   askTopic,
+  generateTopicLearning,
   generateTopicMemory,
   generateTopicSummary,
   getTopicById,
@@ -209,6 +210,7 @@ export function getContentType(filePath: string) {
 
 export const topicAutomation = {
   askTopic,
+  generateTopicLearning,
   generateTopicMemory,
   generateTopicSummary,
   getTopicById,

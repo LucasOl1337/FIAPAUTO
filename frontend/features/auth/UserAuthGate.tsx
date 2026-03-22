@@ -3,6 +3,8 @@ import {
   getSignedInUserLabel,
   getPublicAuthMode,
   isAuthRequired,
+  pingCurrentUserActivity,
+  signInAsVisitor,
   signInWithPassword,
   signUpWithPassword,
 } from '../../engineweb/auth/cognito.ts'
@@ -33,6 +35,19 @@ export function UserAuthGate({ children }: UserAuthGateProps) {
       .catch(() => setUserLabel(''))
       .finally(() => setReady(true))
   }, [])
+
+  useEffect(() => {
+    if (!userLabel || !isAuthRequired()) {
+      return
+    }
+
+    void pingCurrentUserActivity()
+    const intervalId = window.setInterval(() => {
+      void pingCurrentUserActivity()
+    }, 30_000)
+
+    return () => window.clearInterval(intervalId)
+  }, [userLabel])
 
   if (!ready) {
     return (
@@ -89,6 +104,27 @@ export function UserAuthGate({ children }: UserAuthGateProps) {
                 {busy ? 'Entrando...' : 'Entrar'}
               </button>
             ) : null}
+            {mode === 'sign_in' ? (
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={busy}
+                onClick={() => {
+                  setBusy(true)
+                  setError('')
+                  setNotice('')
+                  void signInAsVisitor()
+                    .then((label) => {
+                      setNotice('Entrando como visitante.')
+                      setUserLabel(label)
+                    })
+                    .catch(() => setError('Nao foi possivel abrir o portal como visitante agora.'))
+                    .finally(() => setBusy(false))
+                }}
+              >
+                {busy ? 'Abrindo...' : 'Entrar como visitante'}
+              </button>
+            ) : null}
             {mode === 'sign_up' ? (
               <button
                 type="button"
@@ -106,8 +142,8 @@ export function UserAuthGate({ children }: UserAuthGateProps) {
                     })
                     .catch((signupError) => {
                       const message = signupError instanceof Error ? signupError.message : ''
-                      if (message === 'local_auth_user_exists') {
-                        setError('Esse email ja foi cadastrado neste navegador. Tente entrar com a senha criada.')
+                      if (message === 'public_auth_user_exists') {
+                        setError('Esse email ja foi cadastrado no portal. Tente entrar com a senha criada.')
                         return
                       }
                       setError('Nao foi possivel criar a conta agora. Use um email valido e uma senha com pelo menos 4 caracteres.')

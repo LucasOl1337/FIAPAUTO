@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { botConfig } from '@fiapauto/bots'
+import type { LibraryMatch, LibrarySourceType, ValidatedAnswerEntry } from '../apis/contracts/index.ts'
 import { ensureDir, readJsonFile, writeJsonFile } from '../database/fs.ts'
 import { syncTopicsFromAssignments, type SubjectTopic } from './subjectTopics.ts'
 
@@ -67,17 +68,45 @@ export type KnowledgeWarehouse = {
   moduleCount: number
   conceptCount: number
   faqCount: number
+  libraryCount: number
+  validatedAnswerCount: number
+  learningPatternCount: number
   topics: KnowledgeTopicRef[]
   modules: KnowledgeModuleRef[]
   concepts: KnowledgeConcept[]
   faqGlobal: KnowledgeFaqEntry[]
   relations: KnowledgeRelation[]
+  library: KnowledgeLibraryEntry[]
 }
 
 export type KnowledgeSearchResult = {
   chunk: KnowledgeChunk
   score: number
 }
+
+export type KnowledgeLibraryEntry = {
+  id: string
+  sourceType: LibrarySourceType
+  topicId: string
+  topicTitle: string
+  moduleKey: string
+  text: string
+  question?: string
+  citationsCount: number
+  groundingScore: number
+  sourceSignature: string
+  createdAt: string
+  tokens: string[]
+  keywords: string[]
+}
+
+export type KnowledgeLibrarySearchResult = {
+  entry: KnowledgeLibraryEntry
+  score: number
+  reason: string
+}
+
+const validatedAnswersFile = path.join(botConfig.knowledgeCatalogDir, 'validated-answers.json')
 
 const stopwords = new Set([
   'a', 'ao', 'aos', 'as', 'com', 'como', 'da', 'das', 'de', 'do', 'dos', 'e', 'em', 'entre',
@@ -92,6 +121,7 @@ export async function rebuildKnowledgeWarehouse() {
 
   const topics = await syncTopicsFromAssignments()
   const chunks = topics.flatMap((topic) => buildChunksForTopic(topic))
+  const validatedAnswers = await readValidatedAnswers()
   const generatedAt = new Date().toISOString()
   const topicRefs = topics.map((topic) => ({
     id: topic.id,
@@ -108,6 +138,7 @@ export async function rebuildKnowledgeWarehouse() {
   const relations = buildRelations(topicRefs, modules, concepts)
   const invertedIndex = buildInvertedIndex(chunks)
   const entityMap = buildEntityMap(chunks)
+  const library = buildLibraryEntries(topics, chunks, validatedAnswers)
 
   const warehouse: KnowledgeWarehouse = {
     generatedAt,
@@ -116,11 +147,15 @@ export async function rebuildKnowledgeWarehouse() {
     moduleCount: modules.length,
     conceptCount: concepts.length,
     faqCount: faqGlobal.length,
+    libraryCount: library.length,
+    validatedAnswerCount: validatedAnswers.length,
+    learningPatternCount: library.filter((entry) => entry.sourceType === 'learning_pattern').length,
     topics: topicRefs,
     modules,
     concepts,
     faqGlobal,
     relations,
+    library,
   }
 
   await writeJsonFile(botConfig.knowledgeWarehouseFile, warehouse)
@@ -128,6 +163,8 @@ export async function rebuildKnowledgeWarehouse() {
   await writeJsonFile(path.join(botConfig.knowledgeCatalogDir, 'modules.json'), modules)
   await writeJsonFile(path.join(botConfig.knowledgeCatalogDir, 'concepts.json'), concepts)
   await writeJsonFile(path.join(botConfig.knowledgeCatalogDir, 'faq-global.json'), faqGlobal)
+  await writeJsonFile(validatedAnswersFile, validatedAnswers)
+  await writeJsonFile(path.join(botConfig.knowledgeCatalogDir, 'library.json'), library)
   await writeJsonFile(path.join(botConfig.knowledgeIndexDir, 'inverted-index.json'), invertedIndex)
   await writeJsonFile(path.join(botConfig.knowledgeIndexDir, 'entity-map.json'), entityMap)
   await writeJsonFile(path.join(botConfig.knowledgeIndexDir, 'relations.json'), relations)
@@ -142,7 +179,7 @@ export async function getKnowledgeWarehouse() {
 
 export async function ensureKnowledgeWarehouse() {
   const warehouse = await getKnowledgeWarehouse()
-  if (warehouse) {
+  if (warehouse && Array.isArray(warehouse.library)) {
     return warehouse
   }
 
@@ -162,6 +199,23 @@ export async function readKnowledgeChunks() {
   } catch {
     return []
   }
+}
+
+export async function readValidatedAnswers() {
+  return readJsonFile<ValidatedAnswerEntry[]>(validatedAnswersFile, [])
+}
+
+export async function listValidatedAnswerEntries(topicId?: string) {
+  const entries = await readValidatedAnswers()
+  return topicId ? entries.filter((entry) => entry.topicId === topicId) : entries
+}
+
+export async function saveValidatedAnswerEntry(entry: ValidatedAnswerEntry) {
+  await ensureDir(botConfig.knowledgeCatalogDir)
+  const currentEntries = await readValidatedAnswers()
+  const nextEntries = dedupeValidatedAnswers([entry, ...currentEntries]).slice(0, 400)
+  await writeJsonFile(validatedAnswersFile, nextEntries)
+  return entry
 }
 
 export async function searchKnowledgeChunks(input: {
@@ -197,6 +251,43 @@ export async function searchKnowledgeChunks(input: {
     .slice(0, limit)
 }
 
+export async function searchKnowledgeLibrary(input: {
+  query: string
+  currentTopicId: string
+  currentTopicTitle: string
+  currentModuleKey: string
+  currentDeliverables?: string[]
+  intent?: string
+  limit?: number
+}) {
+  const warehouse = await ensureKnowledgeWarehouse()
+  const tokens = tokenize(input.query)
+  const titleTokens = tokenize(input.currentTopicTitle)
+  const deliverableTokens = tokenize((input.currentDeliverables ?? []).join(' '))
+  const limit = Math.max(1, Math.min(input.limit ?? 6, 12))
+
+  return (warehouse.library ?? [])
+    .filter((entry) => entry.topicId !== input.currentTopicId)
+    .map((entry) => {
+      const { score, reasons } = scoreLibraryEntry(entry, {
+        tokens,
+        titleTokens,
+        deliverableTokens,
+        currentModuleKey: input.currentModuleKey,
+        intent: input.intent ?? 'unknown',
+      })
+
+      return {
+        entry,
+        score,
+        reason: reasons.join('; '),
+      } satisfies KnowledgeLibrarySearchResult
+    })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+}
+
 function buildChunksForTopic(topic: SubjectTopic) {
   const capturedAt = topic.updatedAt
   const chunks: KnowledgeChunk[] = []
@@ -212,10 +303,6 @@ function buildChunksForTopic(topic: SubjectTopic) {
 
   for (const deliverable of topic.agentMemory?.deliverables ?? []) {
     chunks.push(createChunk(topic, 'deliverable', basePath, deliverable, capturedAt))
-  }
-
-  for (const deadline of topic.agentMemory?.deadlines ?? []) {
-    chunks.push(createChunk(topic, 'deadline', basePath, deadline, capturedAt))
   }
 
   for (const faq of topic.agentMemory?.faq ?? []) {
@@ -426,10 +513,176 @@ function buildEntityMap(chunks: KnowledgeChunk[]) {
   return Object.fromEntries(map.entries())
 }
 
+function buildLibraryEntries(
+  topics: SubjectTopic[],
+  chunks: KnowledgeChunk[],
+  validatedAnswers: ValidatedAnswerEntry[],
+) {
+  const topicById = new Map(topics.map((topic) => [topic.id, topic]))
+  const officialEntries = chunks
+    .filter((chunk) => isLibraryWorthyChunk(chunk))
+    .map((chunk) => {
+      const topic = topicById.get(chunk.topicId)
+      return {
+        id: `library:${chunk.id}`,
+        sourceType: 'official_chunk',
+        topicId: chunk.topicId,
+        topicTitle: topic?.title ?? chunk.topicId,
+        moduleKey: chunk.moduleKey,
+        text: chunk.text,
+        citationsCount: 1,
+        groundingScore: 1,
+        sourceSignature: topic?.sourceSignature ?? '',
+        createdAt: chunk.capturedAt,
+        tokens: chunk.tokens,
+        keywords: chunk.keywords,
+      } satisfies KnowledgeLibraryEntry
+    })
+
+  const learningPatternEntries = topics.flatMap((topic) =>
+    (topic.learning?.learningTopics ?? []).map((item) => {
+      const text = [
+        item.title,
+        item.explanation,
+        `Dificuldade comum: ${item.commonDifficulty}`,
+        `Estrategia: ${item.studyStrategy}`,
+      ]
+        .filter(Boolean)
+        .join(' ')
+
+      return {
+        id: `learning:${topic.id}:${hashText(text)}`,
+        sourceType: 'learning_pattern',
+        topicId: topic.id,
+        topicTitle: topic.title,
+        moduleKey: topic.moduleKey,
+        text,
+        citationsCount: 0,
+        groundingScore: 0.72,
+        sourceSignature: topic.sourceSignature,
+        createdAt: topic.learningGeneratedAt ?? topic.updatedAt,
+        tokens: tokenize(text),
+        keywords: extractKeywords(tokenize(text)),
+      } satisfies KnowledgeLibraryEntry
+    }),
+  )
+
+  const validatedAnswerEntries = validatedAnswers
+    .filter((entry) => {
+      const sourceTopic = topicById.get(entry.topicId)
+      return sourceTopic?.sourceSignature === entry.sourceSignature
+    })
+    .map((entry) => ({
+      id: entry.id,
+      sourceType: 'validated_answer',
+      topicId: entry.topicId,
+      topicTitle: entry.topicTitle,
+      moduleKey: entry.moduleKey,
+      text: entry.answer,
+      question: entry.question,
+      citationsCount: entry.citations.length,
+      groundingScore: entry.groundingScore,
+      sourceSignature: entry.sourceSignature,
+      createdAt: entry.createdAt,
+      tokens: tokenize(`${entry.question} ${entry.answer}`),
+      keywords: extractKeywords(tokenize(`${entry.question} ${entry.answer}`)),
+    }) satisfies KnowledgeLibraryEntry)
+
+  return dedupeLibraryEntries([
+    ...officialEntries,
+    ...learningPatternEntries,
+    ...validatedAnswerEntries,
+  ])
+}
+
+function isLibraryWorthyChunk(chunk: KnowledgeChunk) {
+  if (chunk.sourceType === 'content' && chunk.text.length < 80) {
+    return false
+  }
+
+  return !/\b(status|link de detalhe|arquivos baixados|modulo sugerido)\b/i.test(chunk.text)
+}
+
 async function writeChunksJsonl(chunks: KnowledgeChunk[]) {
   const chunksFile = path.join(botConfig.knowledgeIndexDir, 'chunks.jsonl')
   const content = chunks.map((chunk) => JSON.stringify(chunk)).join('\n')
   await fs.writeFile(chunksFile, content ? `${content}\n` : '', 'utf-8')
+}
+
+function scoreLibraryEntry(
+  entry: KnowledgeLibraryEntry,
+  input: {
+    tokens: string[]
+    titleTokens: string[]
+    deliverableTokens: string[]
+    currentModuleKey: string
+    intent: string
+  },
+) {
+  let score = 0
+  const reasons: string[] = []
+
+  for (const token of input.tokens) {
+    if (entry.tokens.includes(token)) {
+      score += 2
+      reasons.push(`token:${token}`)
+    } else if (entry.text.toLowerCase().includes(token)) {
+      score += 1
+    }
+  }
+
+  const titleOverlap = input.titleTokens.filter((token) => entry.tokens.includes(token)).length
+  const deliverableOverlap = input.deliverableTokens.filter((token) => entry.tokens.includes(token)).length
+  if (entry.moduleKey === input.currentModuleKey) {
+    score += 2
+    reasons.push('mesmo_modulo')
+  }
+
+  if (titleOverlap > 0) {
+    score += Math.min(titleOverlap, 3)
+    reasons.push('titulo_parecido')
+  }
+
+  if (deliverableOverlap > 0) {
+    score += Math.min(deliverableOverlap, 2)
+    reasons.push('entregaveis_parecidos')
+  }
+
+  if (entry.sourceType === 'official_chunk') {
+    score += input.intent === 'deliverable' || input.intent === 'grading' ? 3 : 1
+    reasons.push('fonte_oficial')
+  }
+
+  if (entry.sourceType === 'learning_pattern') {
+    score += input.intent === 'explanation' || input.intent === 'next_steps' || input.intent === 'unknown' ? 3 : 1
+    reasons.push('padrao_didatico')
+  }
+
+  if (entry.sourceType === 'validated_answer') {
+    score += 2 + Math.round(entry.groundingScore * 3)
+    if (entry.citationsCount > 0) {
+      score += 2
+      reasons.push('resposta_validada')
+    }
+  }
+
+  const entryAgeDays = Math.max(0, Math.floor((Date.now() - Date.parse(entry.createdAt || '')) / 86400000))
+  if (entryAgeDays > 180) {
+    score -= 2
+    reasons.push('penalidade_antiguidade')
+  }
+
+  if (entry.citationsCount === 0 && entry.sourceType === 'validated_answer') {
+    score -= 3
+    reasons.push('penalidade_sem_citacoes')
+  }
+
+  if (/\b(nao encontrei|nenhuma referencia|nenhum dado)\b/i.test(entry.text)) {
+    score -= 4
+    reasons.push('penalidade_generica')
+  }
+
+  return { score, reasons }
 }
 
 function scoreChunk(
@@ -514,6 +767,19 @@ function dedupeChunkList(chunks: KnowledgeChunk[]) {
   })
 }
 
+function dedupeLibraryEntries(entries: KnowledgeLibraryEntry[]) {
+  const seen = new Set<string>()
+  return entries.filter((entry) => {
+    const key = `${entry.sourceType}:${entry.topicId}:${normalizeText(entry.question || '')}:${normalizeText(entry.text)}`
+    if (!key || seen.has(key)) {
+      return false
+    }
+
+    seen.add(key)
+    return true
+  })
+}
+
 function dedupeStrings(values: string[]) {
   const seen = new Set<string>()
   return values.filter((value) => {
@@ -525,6 +791,46 @@ function dedupeStrings(values: string[]) {
     seen.add(key)
     return true
   })
+}
+
+function dedupeValidatedAnswers(entries: ValidatedAnswerEntry[]) {
+  const seen = new Set<string>()
+  return entries.filter((entry) => {
+    const key = `${entry.topicId}:${normalizeText(entry.question)}:${normalizeText(entry.answer)}`
+    if (!key || seen.has(key)) {
+      return false
+    }
+
+    seen.add(key)
+    return true
+  })
+}
+
+function normalizeText(value: string) {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+export function toLibraryMatch(result: KnowledgeLibrarySearchResult, usedInAnswer: boolean, reason: string): LibraryMatch {
+  return {
+    id: result.entry.id,
+    sourceType: result.entry.sourceType,
+    topicId: result.entry.topicId,
+    topicTitle: result.entry.topicTitle,
+    moduleKey: result.entry.moduleKey,
+    score: Number(result.score.toFixed(2)),
+    confidence: result.score >= 11 ? 'high' : result.score >= 7 ? 'medium' : 'low',
+    usedInAnswer,
+    reason,
+    snippet: result.entry.text.slice(0, 240),
+    question: result.entry.question,
+    citationsCount: result.entry.citationsCount,
+    createdAt: result.entry.createdAt,
+  }
 }
 
 function hashText(text: string) {

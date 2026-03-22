@@ -17,6 +17,8 @@
     "preview": "npm run preview -w @fiapauto/frontend",
     "bot:test": "npm run test -w @fiapauto/bots",
     "bot:worker": "npm run worker -w @fiapauto/bots",
+    "public:up": "powershell -ExecutionPolicy Bypass -File utilities/scripts/start-public-stack.ps1",
+    "public:status": "powershell -ExecutionPolicy Bypass -File utilities/scripts/public-stack-status.ps1",
     "publish:prepare": "npm run publish:prepare -w @fiapauto/backend",
     "publish:push": "npm run publish:push -w @fiapauto/backend",
     "publish:pull": "npm run publish:pull -w @fiapauto/backend",

@@ -27,16 +27,6 @@ export function buildDeterministicResponse(input: {
 }
 
 function selectAnswerByIntent(intent: QuestionIntent, context: TopicContextBundle, topic: SubjectTopic) {
-  if (intent === 'deadline') {
-    return [
-      `O prazo principal identificado para ${topic.title} e ${topic.dueText || 'nao encontrado no material'}.`,
-      context.deadlineHints[0] ? `No contexto salvo tambem aparece: ${context.deadlineHints[0]}` : '',
-      'Se voce for submeter em cima da hora, vale conferir o anexo principal para validar data e horario exatos.',
-    ]
-      .filter(Boolean)
-      .join(' ')
-  }
-
   if (intent === 'deliverable') {
     return [
       `O que aparece como entregavel para ${topic.title}:`,
@@ -81,7 +71,7 @@ function selectAnswerByIntent(intent: QuestionIntent, context: TopicContextBundl
   return [
     topic.summary || `Este trabalho e ${topic.title}.`,
     context.citations[1]?.snippet || '',
-    'Se voce quiser, eu tambem posso transformar isso em checklist, prazo ou entregaveis.',
+    'Se voce quiser, eu tambem posso transformar isso em checklist, entregaveis ou pontos de atencao.',
   ]
     .filter(Boolean)
     .join(' ')
@@ -92,31 +82,27 @@ function buildNextSteps(intent: QuestionIntent, topic: SubjectTopic) {
     return [
       `Confirme o enunciado principal de ${topic.title}.`,
       'Monte uma checklist dos arquivos e requisitos.',
-      `Valide o prazo final: ${topic.dueText || 'nao encontrado'}.`,
+      'Revise nomes, formato e regras de submissao antes de fechar a atividade.',
     ]
   }
 
   return [
     'Revise o resumo da atividade.',
     'Abra o anexo principal para confirmar detalhes finos.',
-    'Pergunte sobre prazo, entregaveis ou criterios se quiser uma resposta mais direta.',
+    'Pergunte sobre entregaveis, checklist ou criterios se quiser uma resposta mais direta.',
   ]
 }
 
 function buildSuggestedQuestions(intent: QuestionIntent) {
-  if (intent === 'deadline') {
-    return ['O que preciso entregar?', 'Me faca um checklist', 'O que pode me fazer perder pontos?']
-  }
-
   if (intent === 'deliverable') {
-    return ['Qual e o prazo?', 'Explique este trabalho de forma simples', 'O que pode me fazer perder pontos?']
+    return ['Me faca um checklist', 'Explique este trabalho de forma simples', 'O que pode me fazer perder pontos?']
   }
 
   if (intent === 'numbered_item') {
     return ['Explique esse item de forma simples', 'Me diga o passo a passo desse item', 'O que preciso entregar nesse item?']
   }
 
-  return ['O que preciso entregar?', 'Qual e o prazo?', 'Me faca um checklist']
+  return ['O que preciso entregar?', 'Me faca um checklist', 'O que pode me fazer perder pontos?']
 }
 
 function collectPenaltyHints(context: TopicContextBundle) {

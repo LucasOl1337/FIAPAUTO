@@ -12,10 +12,13 @@ import {
   runBotDemo,
   syncReadyLessonsIntoWorkspace,
   type BotState,
+  type LibraryMatch,
   type SubjectTopic,
+  type TopicDebugResult,
   buildBotFileUrl,
   type TopicAskResult,
   type TopicSummaryResult,
+  type ValidatedAnswerEntry,
 } from './api/botApi.ts'
 import {
   askPublicTopic,
@@ -41,6 +44,9 @@ export function useWorkspaceController(appMode: 'admin' | 'user') {
   const [topicAnswer, setTopicAnswer] = useState<TopicAskResult | null>(null)
   const [topicQuestion, setTopicQuestion] = useState('')
   const [topicDebugEvents, setTopicDebugEvents] = useState<BotState['llmDebug']['events']>([])
+  const [topicLibraryMatches, setTopicLibraryMatches] = useState<LibraryMatch[]>([])
+  const [topicLibraryDecision, setTopicLibraryDecision] = useState<TopicDebugResult['libraryDecision'] | null>(null)
+  const [validatedAnswerCandidates, setValidatedAnswerCandidates] = useState<ValidatedAnswerEntry[]>([])
   const [activity, setActivity] = useState(
     appMode === 'admin' ? 'Painel operacional pronto para testar o bot' : 'Site publico carregado para consulta de materias',
   )
@@ -88,6 +94,9 @@ export function useWorkspaceController(appMode: 'admin' | 'user') {
     if (!selectedTopicId) {
       setSelectedTopic(null)
       setTopicDebugEvents([])
+      setTopicLibraryMatches([])
+      setTopicLibraryDecision(null)
+      setValidatedAnswerCandidates([])
       return
     }
 
@@ -229,6 +238,9 @@ export function useWorkspaceController(appMode: 'admin' | 'user') {
       setTopicAnswer(null)
       setSelectedTopic(null)
       setTopicDebugEvents([])
+      setTopicLibraryMatches([])
+      setTopicLibraryDecision(null)
+      setValidatedAnswerCandidates([])
       const state = resetWorkspaceState()
       setWorkspace(state)
       setSelectedLessonId(state.lessons[0]?.id ?? '')
@@ -263,11 +275,20 @@ export function useWorkspaceController(appMode: 'admin' | 'user') {
         try {
           const debug = await fetchTopicDebug(topicId)
           setTopicDebugEvents(debug.events)
+          setTopicLibraryMatches(debug.libraryMatches)
+          setTopicLibraryDecision(debug.libraryDecision)
+          setValidatedAnswerCandidates(debug.validatedAnswerCandidates)
         } catch {
           setTopicDebugEvents([])
+          setTopicLibraryMatches([])
+          setTopicLibraryDecision(null)
+          setValidatedAnswerCandidates([])
         }
       } else {
         setTopicDebugEvents([])
+        setTopicLibraryMatches([])
+        setTopicLibraryDecision(null)
+        setValidatedAnswerCandidates([])
       }
     } catch {
       setActivity('Falha ao carregar os detalhes do topico selecionado.')
@@ -328,7 +349,13 @@ export function useWorkspaceController(appMode: 'admin' | 'user') {
       } else {
         await loadTopics(false)
       }
-      if (result.strategyUsed === 'memory') {
+      if (result.qualityStatus === 'accepted') {
+        setActivity('Resposta validada pela IA.')
+      } else if (result.qualityStatus === 'regenerated') {
+        setActivity('Resposta reforcada por segunda passada.')
+      } else if (result.qualityStatus === 'fallback') {
+        setActivity('Resposta entregue pelo fallback local.')
+      } else if (result.strategyUsed === 'memory') {
         setActivity('Resposta entregue pela memoria persistida do topico.')
       } else if (result.strategyUsed === 'deterministic') {
         setActivity('Resposta entregue pelo fallback guiado do assistente.')
@@ -358,6 +385,9 @@ export function useWorkspaceController(appMode: 'admin' | 'user') {
     topicQuestion,
     setTopicQuestion,
     topicDebugEvents,
+    topicLibraryMatches,
+    topicLibraryDecision,
+    validatedAnswerCandidates,
     activity,
     setActivity,
     botBusy,
@@ -736,5 +766,9 @@ function normalizePublicChatResult(
     citations: payload.citations,
     suggestedQuestions: payload.suggestedQuestions,
     nextSteps: payload.nextSteps,
+    qualityStatus: payload.qualityStatus,
+    qualityReason: payload.qualityReason,
+    answeredByPass: payload.answeredByPass,
+    missingSections: payload.missingSections,
   }
 }

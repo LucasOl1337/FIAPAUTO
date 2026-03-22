@@ -12,8 +12,9 @@ const cognitoConfig = {
 const configuredAuthMode = normalizeAuthMode(import.meta.env.VITE_PUBLIC_AUTH_MODE)
 const authMode = configuredAuthMode === 'cognito' && isCognitoConfigComplete() ? 'cognito' : configuredAuthMode
 
-const LOCAL_AUTH_USERS_KEY = 'fiapauto.publicAuth.users'
 const LOCAL_AUTH_SESSION_KEY = 'fiapauto.publicAuth.session'
+const LOCAL_AUTH_TOKEN_KEY = 'fiapauto.publicAuth.token'
+const PUBLIC_API_TUNNEL = 'https://exhibitions-sale-divide-dir.trycloudflare.com'
 
 let configured = false
 
@@ -58,7 +59,23 @@ export async function getAccessToken() {
 
 export async function getSignedInUserLabel() {
   if (authMode === 'local') {
-    return readLocalSession()?.email ?? ''
+    const token = readLocalAuthToken()
+    if (!token) {
+      return readLocalSession()?.email ?? ''
+    }
+
+    try {
+      const session = await requestLocalAuth<{ userLabel: string; email?: string; token: string; isGuest: boolean }>('/api/public/auth/me', {
+        method: 'GET',
+        token,
+      })
+      writeLocalSession({ email: session.email || session.userLabel, userLabel: session.userLabel, isGuest: session.isGuest })
+      return session.userLabel
+    } catch {
+      clearLocalSession()
+      clearLocalAuthToken()
+      return ''
+    }
   }
 
   if (authMode !== 'cognito') {
@@ -72,13 +89,12 @@ export async function getSignedInUserLabel() {
 
 export async function signInWithPassword(username: string, password: string) {
   if (authMode === 'local') {
-    const normalizedEmail = normalizeEmail(username)
-    const user = readLocalUsers().find((entry) => entry.email === normalizedEmail && entry.password === password)
-    if (!user) {
-      throw new Error('local_auth_invalid_credentials')
-    }
-
-    writeLocalSession({ email: user.email })
+    const session = await requestLocalAuth<{ token: string; userLabel: string; isGuest: boolean; email?: string }>('/api/public/auth/sign-in', {
+      method: 'POST',
+      body: { email: username, password },
+    })
+    writeLocalAuthToken(session.token)
+    writeLocalSession({ email: session.email || session.userLabel, userLabel: session.userLabel, isGuest: session.isGuest })
     return { nextStep: { signInStep: 'DONE' } }
   }
 
@@ -94,24 +110,12 @@ export async function signUpWithPassword(input: {
   password: string
 }) {
   if (authMode === 'local') {
-    const normalizedEmail = normalizeEmail(input.email)
-    if (!normalizedEmail || input.password.trim().length < 4) {
-      throw new Error('local_auth_invalid_signup')
-    }
-
-    const users = readLocalUsers()
-    if (users.some((entry) => entry.email === normalizedEmail)) {
-      throw new Error('local_auth_user_exists')
-    }
-
-    users.push({
-      email: normalizedEmail,
-      password: input.password,
-      createdAt: new Date().toISOString(),
+    const session = await requestLocalAuth<{ token: string; userLabel: string; isGuest: boolean; email?: string }>('/api/public/auth/sign-up', {
+      method: 'POST',
+      body: input,
     })
-
-    writeLocalUsers(users)
-    writeLocalSession({ email: normalizedEmail })
+    writeLocalAuthToken(session.token)
+    writeLocalSession({ email: session.email || session.userLabel, userLabel: session.userLabel, isGuest: session.isGuest })
     return { isSignUpComplete: true }
   }
 
@@ -154,7 +158,19 @@ export async function resendUserConfirmationCode(email: string) {
 
 export async function signOutCurrentUser() {
   if (authMode === 'local') {
+    const token = readLocalAuthToken()
+    if (token) {
+      try {
+        await requestLocalAuth('/api/public/auth/sign-out', {
+          method: 'POST',
+          token,
+        })
+      } catch {
+        // Best effort only; local session cleanup still proceeds.
+      }
+    }
     clearLocalSession()
+    clearLocalAuthToken()
     return
   }
 
@@ -178,36 +194,6 @@ function normalizeAuthMode(value: string | undefined): PublicAuthMode {
   return 'local'
 }
 
-function normalizeEmail(value: string) {
-  return value.trim().toLowerCase()
-}
-
-function readLocalUsers() {
-  if (typeof window === 'undefined') {
-    return [] as Array<{ email: string; password: string; createdAt: string }>
-  }
-
-  try {
-    const raw = window.localStorage.getItem(LOCAL_AUTH_USERS_KEY)
-    if (!raw) {
-      return []
-    }
-
-    const parsed = JSON.parse(raw) as Array<{ email: string; password: string; createdAt: string }>
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-function writeLocalUsers(users: Array<{ email: string; password: string; createdAt: string }>) {
-  if (typeof window === 'undefined') {
-    return
-  }
-
-  window.localStorage.setItem(LOCAL_AUTH_USERS_KEY, JSON.stringify(users))
-}
-
 function readLocalSession() {
   if (typeof window === 'undefined') {
     return null
@@ -219,14 +205,14 @@ function readLocalSession() {
       return null
     }
 
-    const parsed = JSON.parse(raw) as { email?: string }
-    return parsed.email ? { email: parsed.email } : null
+    const parsed = JSON.parse(raw) as { email?: string; userLabel?: string; isGuest?: boolean }
+    return parsed.userLabel ? { email: parsed.email ?? '', userLabel: parsed.userLabel, isGuest: Boolean(parsed.isGuest) } : null
   } catch {
     return null
   }
 }
 
-function writeLocalSession(session: { email: string }) {
+function writeLocalSession(session: { email: string; userLabel: string; isGuest: boolean }) {
   if (typeof window === 'undefined') {
     return
   }
@@ -240,4 +226,120 @@ function clearLocalSession() {
   }
 
   window.localStorage.removeItem(LOCAL_AUTH_SESSION_KEY)
+}
+
+export async function signInAsVisitor() {
+  if (authMode !== 'local') {
+    throw new Error('visitor_mode_only_available_in_local_auth')
+  }
+
+  const session = await requestLocalAuth<{ token: string; userLabel: string; isGuest: boolean; email?: string }>('/api/public/auth/guest', {
+    method: 'POST',
+  })
+  writeLocalAuthToken(session.token)
+  writeLocalSession({ email: session.email || session.userLabel, userLabel: session.userLabel, isGuest: session.isGuest })
+  return session.userLabel
+}
+
+export async function pingCurrentUserActivity() {
+  if (authMode !== 'local') {
+    return
+  }
+
+  const token = readLocalAuthToken()
+  if (!token) {
+    return
+  }
+
+  try {
+    await requestLocalAuth('/api/public/auth/ping', {
+      method: 'POST',
+      token,
+    })
+  } catch {
+    // Ignore heartbeat failures; the visible session can recover on next page load.
+  }
+}
+
+function readLocalAuthToken() {
+  if (typeof window === 'undefined') {
+    return ''
+  }
+
+  return window.localStorage.getItem(LOCAL_AUTH_TOKEN_KEY) ?? ''
+}
+
+function writeLocalAuthToken(token: string) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.localStorage.setItem(LOCAL_AUTH_TOKEN_KEY, token)
+}
+
+function clearLocalAuthToken() {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.localStorage.removeItem(LOCAL_AUTH_TOKEN_KEY)
+}
+
+async function requestLocalAuth<T = unknown>(
+  path: string,
+  input: {
+    method: 'GET' | 'POST'
+    body?: unknown
+    token?: string
+  },
+) {
+  const headers = new Headers({
+    'Content-Type': 'application/json',
+  })
+  if (input.token) {
+    headers.set('Authorization', `Bearer ${input.token}`)
+  }
+
+  const response = await fetch(`${resolvePublicApiBase()}${path}`, {
+    method: input.method,
+    headers,
+    body: input.body ? JSON.stringify(input.body) : undefined,
+  })
+
+  if (!response.ok) {
+    let errorCode = 'public_auth_request_failed'
+    try {
+      const payload = (await response.json()) as { error?: string }
+      if (payload.error) {
+        errorCode = payload.error
+      }
+    } catch {
+      // Keep default error code when the body isn't JSON.
+    }
+    throw new Error(errorCode)
+  }
+
+  return (await response.json()) as T
+}
+
+function resolvePublicApiBase() {
+  const explicitCandidates = [
+    import.meta.env.VITE_PUBLIC_API_BASE_URL,
+    import.meta.env.VITE_API_BASE_URL,
+  ]
+    .map((value) => value?.trim() ?? '')
+    .filter(Boolean)
+
+  const explicitBase = explicitCandidates.find((value) => !shouldIgnoreExplicitApiBase(value))
+  return (explicitBase || PUBLIC_API_TUNNEL).replace(/\/+$/, '')
+}
+
+function shouldIgnoreExplicitApiBase(value: string) {
+  try {
+    const hostname = new URL(value).hostname
+    const currentHostname = typeof window === 'undefined' ? '' : window.location.hostname
+    return /^(127\.0\.0\.1|localhost)$/i.test(hostname) && !/^(127\.0\.0\.1|localhost)$/i.test(currentHostname)
+  } catch {
+    return false
+  }
 }

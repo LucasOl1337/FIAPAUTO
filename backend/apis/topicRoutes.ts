@@ -61,6 +61,18 @@ export async function handleTopicRoutes(
     return true
   }
 
+  if (request.method === 'POST' && suffix === '/generate-learning') {
+    if (!requireAdminAccess(request, response)) {
+      return true
+    }
+    const body = await readJsonBody(request)
+    sendJson(response, 200, {
+      topicId,
+      learning: await topicAutomation.generateTopicLearning(topicId, body.force === true),
+    })
+    return true
+  }
+
   if (request.method === 'POST' && suffix === '/ask') {
     const body = await readJsonBody(request)
     const question = typeof body.question === 'string' ? body.question.trim() : ''
