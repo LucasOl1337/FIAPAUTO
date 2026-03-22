@@ -51,9 +51,9 @@ export function UserAuthGate({ children }: UserAuthGateProps) {
     return (
       <main className="simple-app">
         <section className="hero-card">
-          <p className="eyebrow">FIAPAUTO</p>
+          <p className="eyebrow">FiapFlow</p>
           <h1>Validando sessao do usuario</h1>
-          <p className="hero-text">Estamos preparando o acesso autenticado ao portal do aluno.</p>
+          <p className="hero-text">Estamos preparando seu acesso.</p>
         </section>
       </main>
     )
@@ -66,12 +66,12 @@ export function UserAuthGate({ children }: UserAuthGateProps) {
   return (
     <main className="simple-app">
       <section className="hero-card">
-        <p className="eyebrow">FIAPAUTO</p>
+        <p className="eyebrow">FiapFlow</p>
         <h1>{mode === 'sign_up' ? 'Criar conta no portal do aluno' : 'Entrar no portal do aluno'}</h1>
         <p className="hero-text">
           {mode === 'sign_up'
-            ? 'Crie sua conta com email e senha e entre na hora para testar o portal publicado.'
-            : 'Use um email e senha registrados no backend publico do projeto, ou entre como visitante.'}
+            ? 'Crie sua conta com email e senha para acessar o portal.'
+            : 'Use seu email e senha, ou entre como visitante.'}
         </p>
         <div className="admin-gate">
           <label className="admin-gate-label" htmlFor="user-email">Email</label>
