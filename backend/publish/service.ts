@@ -30,6 +30,7 @@ export type PreparedPublicBundle = {
 }
 
 const schemaVersion = 1
+let currentBundlePromise: Promise<PublicManifest> | null = null
 
 export async function preparePublicBundle() {
   await ensureDir(runtimePaths.publicReleasesDir)
@@ -145,8 +146,7 @@ export async function preparePublicBundle() {
     publishedAt,
   } satisfies CurrentReleasePointer)
 
-  await fs.rm(runtimePaths.publicCurrentDir, { recursive: true, force: true })
-  await fs.cp(releaseDir, runtimePaths.publicCurrentDir, { recursive: true })
+  await replaceCurrentBundle(releaseDir, releaseId)
 
   return {
     manifest,
@@ -168,7 +168,15 @@ export async function ensureCurrentLocalBundle() {
     return manifest
   }
 
-  return (await preparePublicBundle()).manifest
+  if (!currentBundlePromise) {
+    currentBundlePromise = preparePublicBundle()
+      .then((result) => result.manifest)
+      .finally(() => {
+        currentBundlePromise = null
+      })
+  }
+
+  return currentBundlePromise
 }
 
 export async function readCurrentLocalTopicList() {
@@ -246,8 +254,9 @@ async function copyAssetIntoRelease(
 
 function buildReleaseId() {
   const now = new Date()
-  const compact = now.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z')
-  return `release-${compact}`
+  const compact = now.toISOString().replace(/[-:]/g, '').replace(/\./g, '-')
+  const randomSuffix = crypto.randomBytes(3).toString('hex')
+  return `release-${compact}-${randomSuffix}`
 }
 
 function buildContentHash(input: unknown) {
@@ -273,4 +282,62 @@ function guessMimeType(filePath: string) {
   if (extension === '.json') return 'application/json; charset=utf-8'
   if (extension === '.txt') return 'text/plain; charset=utf-8'
   return 'application/octet-stream'
+}
+
+async function copyDirectoryContents(sourceDir: string, targetDir: string) {
+  await ensureDir(targetDir)
+  const entries = await fs.readdir(sourceDir, { withFileTypes: true })
+
+  for (const entry of entries) {
+    const sourcePath = path.join(sourceDir, entry.name)
+    const targetPath = path.join(targetDir, entry.name)
+
+    if (entry.isDirectory()) {
+      await copyDirectoryContents(sourcePath, targetPath)
+      continue
+    }
+
+    await ensureDir(path.dirname(targetPath))
+    await fs.copyFile(sourcePath, targetPath)
+  }
+}
+
+async function replaceCurrentBundle(releaseDir: string, releaseId: string) {
+  const stagingDir = path.join(runtimePaths.publicSyncDir, `current-next-${releaseId}`)
+  const previousDir = path.join(runtimePaths.publicSyncDir, 'current-previous')
+
+  await fs.rm(stagingDir, { recursive: true, force: true })
+  await copyDirectoryContents(releaseDir, stagingDir)
+
+  try {
+    await fs.rm(previousDir, { recursive: true, force: true })
+  } catch {
+    // Best effort cleanup of an old backup directory.
+  }
+
+  try {
+    await fs.rename(runtimePaths.publicCurrentDir, previousDir)
+  } catch (error) {
+    const code = error instanceof Error && 'code' in error ? String(error.code) : ''
+    if (code !== 'ENOENT') {
+      throw error
+    }
+  }
+
+  try {
+    await fs.rename(stagingDir, runtimePaths.publicCurrentDir)
+  } catch (error) {
+    try {
+      await fs.rm(runtimePaths.publicCurrentDir, { recursive: true, force: true })
+    } catch {
+      // Ignore and retry the final rename once.
+    }
+    await fs.rename(stagingDir, runtimePaths.publicCurrentDir)
+  } finally {
+    try {
+      await fs.rm(previousDir, { recursive: true, force: true })
+    } catch {
+      // Readers may keep files open on Windows; keep the latest current bundle anyway.
+    }
+  }
 }
