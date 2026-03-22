@@ -70,13 +70,13 @@ export function useWorkspaceController(appMode: 'admin' | 'user') {
     }
 
     void loadTopics(false)
-  }, [appMode, refreshBotStatusEvent])
+  }, [appMode])
 
   useEffect(() => {
     if (appMode !== 'admin' || botState.authStatus === 'authenticated') return
     const timer = window.setInterval(() => refreshBotStatusEvent(false), 5000)
     return () => window.clearInterval(timer)
-  }, [appMode, botState.authStatus, refreshBotStatusEvent])
+  }, [appMode, botState.authStatus])
 
   useEffect(() => {
     if (!workspace.lessons.find((lesson) => lesson.id === selectedLessonId)) {

@@ -94,22 +94,7 @@ function AdminApp() {
 function BrandMark() {
   return (
     <span className="brand-mark" aria-hidden="true">
-      <svg viewBox="0 0 64 64" role="img">
-        <defs>
-          <linearGradient id="brand-red" x1="8" y1="8" x2="54" y2="56">
-            <stop offset="0%" stopColor="#ff8080" />
-            <stop offset="38%" stopColor="#ff394d" />
-            <stop offset="100%" stopColor="#c30029" />
-          </linearGradient>
-        </defs>
-        <rect width="64" height="64" rx="18" fill="#0f0f10" />
-        <g fill="url(#brand-red)">
-          <path d="M11 12c0-2.8 2.2-5 5-5h14c-.5 4.9-4.6 8.7-9.6 8.7H16v4.4h10.5l-4.6 6.2H16V40h-5z" />
-          <path d="M35 12c0-2.8 2.2-5 5-5h14c-.5 4.9-4.6 8.7-9.6 8.7H40v4.4h10.5l-4.6 6.2H40V40h-5z" />
-          <path d="M11 35c0-2.8 2.2-5 5-5h14c-.5 4.9-4.6 8.7-9.6 8.7H16V43h10.5l-4.6 6.2H16V57h-5z" />
-          <path d="M35 35c0-2.8 2.2-5 5-5h14c-.5 4.9-4.6 8.7-9.6 8.7H40V43h10.5l-4.6 6.2H40V57h-5z" />
-        </g>
-      </svg>
+      <img src="/brand-icon.jpg" alt="" />
     </span>
   )
 }
