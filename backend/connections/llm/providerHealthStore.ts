@@ -96,6 +96,10 @@ export function isProviderCircuitOpen(state: ProviderHealth, now = new Date()) {
     return false
   }
 
+  if (hasUsableProviderKey(state, now)) {
+    return false
+  }
+
   return new Date(state.circuitOpenUntil).getTime() > now.getTime()
 }
 
@@ -105,6 +109,18 @@ export function isKeyCoolingDown(key: ProviderKeyHealth, now = new Date()) {
   }
 
   return new Date(key.cooldownUntil).getTime() > now.getTime()
+}
+
+export function hasUsableProviderKey(state: ProviderHealth, now = new Date()) {
+  return state.keys.some((key) => isKeyUsable(key, now))
+}
+
+export function isKeyUsable(key: ProviderKeyHealth, now = new Date()) {
+  if (isKeyCoolingDown(key, now)) {
+    return false
+  }
+
+  return key.status === 'active'
 }
 
 function ensureProviderState(state: ProviderHealthState, provider: ProviderName) {

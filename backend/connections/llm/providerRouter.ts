@@ -1,7 +1,7 @@
 import { llmBaseUrl, postLlmChat, resolveApiKeyWithMeta, type LlmDocument, type LlmImage } from './llmClient.ts'
 import { postGeminiChat, readGeminiLocalKeys, type GeminiKeyEntry } from './geminiClient.ts'
 import { postOllamaChat, readOllamaLocalKeys, type OllamaKeyEntry } from './ollamaClient.ts'
-import { isKeyCoolingDown, isProviderCircuitOpen, markProviderAttempt, readProviderHealth, type ProviderName } from './providerHealthStore.ts'
+import { isKeyCoolingDown, isKeyUsable, isProviderCircuitOpen, markProviderAttempt, readProviderHealth, type ProviderName } from './providerHealthStore.ts'
 
 export type ProviderStrategy = 'rag_llm' | 'provider_fallback' | 'deterministic'
 
@@ -51,7 +51,7 @@ export async function routeAssistantChat(request: ProviderChatRequest) {
       continue
     }
 
-    const keyMeta = resolveProviderKey(provider)
+    const keyMeta = resolveProviderKey(provider, providerHealth)
     const knownKey = keyMeta.keyName
       ? providerHealth.keys.find((item) => item.keyName === keyMeta.keyName)
       : undefined
@@ -145,7 +145,7 @@ function parseTimeout(value: string | undefined) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
 }
 
-function resolveProviderKey(provider: ProviderConfig) {
+function resolveProviderKey(provider: ProviderConfig, providerHealth: Awaited<ReturnType<typeof readProviderHealth>>) {
   if (provider.apiKey?.trim()) {
     return {
       value: provider.apiKey.trim(),
@@ -154,7 +154,7 @@ function resolveProviderKey(provider: ProviderConfig) {
   }
 
   if (provider.localKeys?.length) {
-    const selected = provider.localKeys[Date.now() % provider.localKeys.length]
+    const selected = pickBestLocalKey(provider.localKeys, providerHealth)
     return {
       value: selected.value,
       keyName: selected.name,
@@ -162,6 +162,34 @@ function resolveProviderKey(provider: ProviderConfig) {
   }
 
   return resolveApiKeyWithMeta()
+}
+
+function pickBestLocalKey(
+  keys: Array<GeminiKeyEntry | OllamaKeyEntry>,
+  providerHealth: Awaited<ReturnType<typeof readProviderHealth>>,
+) {
+  const healthByName = new Map(providerHealth.keys.map((key) => [key.keyName, key]))
+  const scored = keys.map((key, index) => {
+    const health = healthByName.get(key.name)
+    const usable = health ? isKeyUsable(health) : true
+    const coolingDown = health ? isKeyCoolingDown(health) : false
+    const failed = health?.status === 'failed'
+    const score =
+      (usable ? 1000 : 0)
+      + (!coolingDown ? 100 : 0)
+      + (failed ? 0 : 10)
+      + (health?.successCount ?? 0)
+      - ((health?.failCount ?? 0) * 5)
+      - index
+
+    return {
+      key,
+      score,
+    }
+  })
+
+  scored.sort((left, right) => right.score - left.score)
+  return scored[0]!.key
 }
 
 async function invokeProvider(
