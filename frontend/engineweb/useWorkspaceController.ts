@@ -85,6 +85,10 @@ export function useWorkspaceController(appMode: 'admin' | 'user') {
   }, [selectedLessonId, workspace.lessons])
 
   useEffect(() => {
+    if (botState.topics.length === 0) {
+      return
+    }
+
     if (!botState.topics.find((topic) => topic.id === selectedTopicId)) {
       setSelectedTopicId(botState.topics[0]?.id ?? '')
     }
@@ -123,15 +127,16 @@ export function useWorkspaceController(appMode: 'admin' | 'user') {
   async function loadTopics(showMessage = true) {
     try {
       const topics = await fetchPublicTopics()
+      const nextTopics = topics.topics.map(mapPublishedTopicListToTopic)
 
       setBotState((current) => ({
         ...current,
-        topics: topics.topics.map(mapPublishedTopicListToTopic),
+        topics: nextTopics.length === 0 && current.topics.length > 0 ? current.topics : nextTopics,
         apiConnected: true,
       }))
 
-      if (!selectedTopicId && topics.topics[0]) {
-        setSelectedTopicId(topics.topics[0].id)
+      if (!selectedTopicId && nextTopics[0]) {
+        setSelectedTopicId(nextTopics[0].id)
       }
 
       if (showMessage) {
