@@ -36,7 +36,7 @@ function PublicApp(props: { userLabel: string }) {
           <div>
             <p className="eyebrow">FIAPAUTO</p>
             <h1>Assistente de Materias</h1>
-            <p className="hero-text">Experiencia publica focada em entender entregaveis, prazo e proximos passos.</p>
+            <p className="hero-text">Experiencia publica focada em entender entregaveis, contexto da materia e proximos passos.</p>
           </div>
           {props.userLabel ? (
             <div className="action-row">

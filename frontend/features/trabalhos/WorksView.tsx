@@ -48,13 +48,13 @@ export function WorksView({ controller }: WorksViewProps) {
     controller.selectedTopic?.agentMemory?.keyFacts ?? [],
     controller.selectedTopic?.summary ?? '',
   )
+  const fullAnswerItems = buildFullAnswerItems(parsedAnswer)
   const deliverableItems = compactAnswerItems(parsedAnswer.deliverables.length > 0 ? parsedAnswer.deliverables : userDeliverables, 2, 72)
   const nextActionItems = compactAnswerItems(parsedAnswer.nextSteps.length > 0 ? parsedAnswer.nextSteps : answerNextSteps, 2, 76)
   const suggestionItems = compactAnswerItems(answerSuggestions, 3, 58)
   const sourcePreviewItems = compactAnswerItems(answerCitations.map((citation) => `${citation.sourceLabel}: ${sanitizeAssistantText(citation.snippet)}`), 2, 150)
   const compactDirect = truncateText(parsedAnswer.direct, 160)
-  const compactAttention = compactAnswerItems(attentionItems, 1, 180)
-  const deadlineItems = compactAnswerItems(parsedAnswer.deadline, 1, 90)
+  const compactAttention = compactAnswerItems(expandAnswerBullets(attentionItems), 3, 96)
   const qualityLabel =
     topicAnswer?.qualityStatus === 'regenerated'
       ? 'Resposta reforcada automaticamente'
@@ -155,17 +155,17 @@ export function WorksView({ controller }: WorksViewProps) {
                         <span className="info-chip">{answerConfidenceLabel}</span>
                       </div>
                     </div>
+                    <div className="meta-card clean-card assistant-full-answer-card">
+                      <span>Resposta completa</span>
+                      <div className="assistant-bullet-list prose">
+                        {fullAnswerItems.length > 0 ? fullAnswerItems.map((item) => <p key={item}>{item}</p>) : <p>O agente respondera aqui com mais contexto.</p>}
+                      </div>
+                    </div>
                     <div className="assistant-compact-grid">
                       <div className="meta-card clean-card assistant-brief-card">
                         <span>O que entregar</span>
                         <div className="assistant-bullet-list">
                           {deliverableItems.length > 0 ? deliverableItems.map((item) => <p key={item}>{item}</p>) : <p>Abra o anexo principal e confirme o que precisa ser enviado.</p>}
-                        </div>
-                      </div>
-                      <div className="meta-card clean-card assistant-brief-card warning">
-                        <span>Prazo</span>
-                        <div className="assistant-bullet-list">
-                          {deadlineItems.length > 0 ? deadlineItems.map((item) => <p key={item}>{item}</p>) : <p>Nao encontrei isso no material.</p>}
                         </div>
                       </div>
                       <div className="meta-card clean-card assistant-brief-card warning">
@@ -367,7 +367,6 @@ export function WorksView({ controller }: WorksViewProps) {
 type ParsedAssistantAnswer = {
   direct: string
   deliverables: string[]
-  deadline: string[]
   attention: string[]
   nextSteps: string[]
   extra: string[]
@@ -382,7 +381,6 @@ function parseAssistantAnswer(answer: string | undefined): ParsedAssistantAnswer
   const parsed: ParsedAssistantAnswer = {
     direct: '',
     deliverables: [],
-    deadline: [],
     attention: [],
     nextSteps: [],
     extra: [],
@@ -439,7 +437,6 @@ function normalizeAssistantSection(value: string) {
 
   if (/^resposta direta|^resumo rapido|^resumo em 10 segundos/.test(normalized)) return 'direct' satisfies keyof ParsedAssistantAnswer
   if (/^o que entregar|^entrega|^entregaveis?/.test(normalized)) return 'deliverables' satisfies keyof ParsedAssistantAnswer
-  if (/^prazo|^data/.test(normalized)) return 'deadline' satisfies keyof ParsedAssistantAnswer
   if (/^atencao|^pontos? de atencao|^riscos?/.test(normalized)) return 'attention' satisfies keyof ParsedAssistantAnswer
   if (/^como fazer|^como comecar|^comece assim/.test(normalized)) return 'nextSteps' satisfies keyof ParsedAssistantAnswer
   if (/^proximo passo|^proximos passos|^checklist/.test(normalized)) return 'nextSteps' satisfies keyof ParsedAssistantAnswer
@@ -482,6 +479,27 @@ function buildAttentionItems(answerAttention: string[], keyFacts: string[], summ
   return summaryMatches.slice(0, 3)
 }
 
+function buildFullAnswerItems(answer: ParsedAssistantAnswer) {
+  const items = [
+    sanitizeAssistantText(answer.direct),
+    ...answer.extra.map((item) => sanitizeAssistantText(item)),
+  ].filter(Boolean)
+
+  return dedupeAssistantItems(items).slice(0, 4)
+}
+
+function expandAnswerBullets(items: string[]) {
+  const parts = items.flatMap((item) =>
+    sanitizeAssistantText(item)
+      .replace(/^(pontos?\s+de\s+atencao|atencao)\s*:\s*/i, '')
+      .split(/\s*;\s*|\.\s+(?=[A-ZÀ-ÿ0-9-])/)
+      .map((part) => sanitizeAssistantText(part))
+      .filter(Boolean),
+  )
+
+  return dedupeAssistantItems(parts)
+}
+
 function compactAnswerItems(items: string[], limit: number, maxLength: number) {
   return items
     .map((item) => sanitizeAssistantText(item))
@@ -489,6 +507,10 @@ function compactAnswerItems(items: string[], limit: number, maxLength: number) {
     .filter((item, index, array) => array.findIndex((candidate) => candidate.toLowerCase() === item.toLowerCase()) === index)
     .slice(0, limit)
     .map((item) => truncateText(item, maxLength))
+}
+
+function dedupeAssistantItems(items: string[]) {
+  return items.filter((item, index, array) => array.findIndex((candidate) => candidate.toLowerCase() === item.toLowerCase()) === index)
 }
 
 function sanitizeAssistantText(value: string) {

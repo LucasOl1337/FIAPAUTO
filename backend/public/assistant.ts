@@ -10,7 +10,6 @@ type Citation = PublicChatResponse['citations'][number]
 type ParsedStructuredAnswer = {
   direct: string
   deliverables: string[]
-  deadline: string[]
   attention: string[]
   nextSteps: string[]
   extra: string[]
@@ -25,7 +24,6 @@ type QualityEvaluation = {
 type DeterministicPackage = {
   answer: string
   deliverables: string[]
-  deadline: string[]
   attention: string[]
   nextSteps: string[]
 }
@@ -201,7 +199,6 @@ function buildProviderPayload(input: {
     answer: formatStructuredAnswer({
       direct: parsed.direct,
       deliverables: parsed.deliverables,
-      deadline: parsed.deadline,
       attention: parsed.attention,
       nextSteps: parsed.nextSteps,
     }),
@@ -260,8 +257,7 @@ function buildDeterministicPackage(input: {
   intent: QuestionIntent
 }): DeterministicPackage {
   const deliverables = buildDeliverableItems(input.topic, input.citations)
-  const deadline = buildDeadlineItems(input.topic, input.citations)
-  const attention = buildAttentionItems(input.topic, input.citations).slice(0, 2)
+  const attention = buildAttentionItems(input.topic, input.citations).slice(0, 3)
   const nextSteps = buildActionableSteps({
     topic: input.topic,
     question: input.question,
@@ -274,19 +270,16 @@ function buildDeterministicPackage(input: {
     intent: input.intent,
     citations: input.citations,
     deliverables,
-    deadline,
   })
 
   return {
     answer: formatStructuredAnswer({
       direct,
       deliverables,
-      deadline,
       attention,
       nextSteps,
     }),
     deliverables,
-    deadline,
     attention,
     nextSteps,
   }
@@ -298,7 +291,6 @@ function buildDirectFallback(input: {
   intent: QuestionIntent
   citations: Citation[]
   deliverables: string[]
-  deadline: string[]
 }) {
   const normalizedQuestion = normalizeText(input.question)
   const summaryBase = input.topic.summary || input.topic.agentMemory?.overview || input.citations[0]?.snippet || ''
@@ -307,10 +299,6 @@ function buildDirectFallback(input: {
     citations: input.citations,
     question: input.question,
   })
-
-  if (input.intent === 'deadline') {
-    return input.deadline[0] || 'Nao encontrei um prazo confirmado no material publicado.'
-  }
 
   if (input.intent === 'deliverable') {
     return input.deliverables.length > 0
@@ -381,10 +369,6 @@ function buildPrompt(input: {
     .slice(0, 8)
     .map((item) => `- ${item}`)
     .join('\n')
-  const deadlineFacts = (input.topic.agentMemory?.deadlines ?? [])
-    .slice(0, 4)
-    .map((item) => `- ${item}`)
-    .join('\n')
   const chunkBlock = input.rankedChunks
     .map((chunk, index) => `[${index + 1}] ${chunk.sourceType}: ${chunk.text}`)
     .join('\n\n')
@@ -421,9 +405,6 @@ function buildPrompt(input: {
     'Entregaveis conhecidos:',
     (input.topic.agentMemory?.deliverables ?? []).map((item) => `- ${item}`).join('\n') || '- Nenhum entregavel confirmado.',
     '',
-    'Prazos conhecidos:',
-    deadlineFacts || '- Nenhum prazo confirmado.',
-    '',
     'Fatos importantes:',
     keyFacts || '- Nenhum fato importante publicado.',
     '',
@@ -444,7 +425,6 @@ function buildPrompt(input: {
     'Formato obrigatorio da resposta:',
     'RESPOSTA DIRETA:',
     'O QUE ENTREGAR:',
-    'PRAZO:',
     'ATENCAO:',
     'PROXIMO PASSO:',
     '',
@@ -518,7 +498,6 @@ function buildDocuments(topic: PublicTopic, citations: Citation[]) {
       content: JSON.stringify({
         overview: topic.agentMemory?.overview ?? '',
         deliverables: topic.agentMemory?.deliverables ?? [],
-        deadlines: topic.agentMemory?.deadlines ?? [],
         keyFacts: topic.agentMemory?.keyFacts ?? [],
       }),
     },
@@ -563,22 +542,6 @@ async function readTopicImages(topic: PublicTopic) {
   return images.filter((item): item is NonNullable<typeof item> => Boolean(item))
 }
 
-function buildDeadlineItems(topic: PublicTopic, citations: Citation[]) {
-  const values = dedupeItems([
-    topic.dueText,
-    ...(topic.agentMemory?.deadlines ?? []).flatMap((item) => extractDeadlineSignals(item)),
-    ...citations
-      .filter((item) => item.sourceType === 'deadline' || /prazo|data|horario|vence|entrega/i.test(item.snippet))
-      .flatMap((item) => extractDeadlineSignals(item.snippet)),
-  ]).filter(Boolean)
-
-  if (values.length > 0) {
-    return values.slice(0, 2)
-  }
-
-  return ['Nao encontrei isso no material']
-}
-
 function buildDeliverableItems(topic: PublicTopic, citations: Citation[]) {
   const summaryItems = extractDeliverableSignals(topic.summary || '')
   const citationItems = citations
@@ -617,10 +580,6 @@ function buildActionableSteps(input: {
       steps.push(`Nao trate ${toolContext.toolLabel} como exigencia agora: primeiro confirme o que realmente foi pedido no trabalho.`)
       steps.push('Se este checkpoint for o correto, foque nos entregaveis publicados e valide o PDF principal.')
     }
-  }
-
-  if (input.intent === 'deadline') {
-    steps.push(`Confirme o horario final diretamente no material principal: ${input.topic.dueText || 'nao encontrado'}.`)
   }
 
   if (input.intent === 'deliverable') {
@@ -677,7 +636,7 @@ function evaluateAnswerQuality(input: {
   const missingSections: string[] = []
   const combinedDirect = normalizeText(input.parsed.direct)
   const combinedAll = normalizeText(
-    [input.parsed.direct, ...input.parsed.deliverables, ...input.parsed.deadline, ...input.parsed.attention, ...input.parsed.nextSteps].join(' '),
+    [input.parsed.direct, ...input.parsed.deliverables, ...input.parsed.attention, ...input.parsed.nextSteps].join(' '),
   )
   const hasRelevantContext = Boolean(input.topic.summary || input.topic.agentMemory?.overview || input.citations.length > 0)
   const directLooksGeneric =
@@ -696,11 +655,6 @@ function evaluateAnswerQuality(input: {
     case 'deliverable':
       if (input.parsed.deliverables.length === 0 && !/entrega|arquivo|pdf|excel|anexo|nao encontrei/.test(combinedAll)) {
         missingSections.push('O QUE ENTREGAR')
-      }
-      break
-    case 'deadline':
-      if (input.parsed.deadline.length === 0 && !/prazo|data|horario|entrega|nao encontrei/.test(combinedAll)) {
-        missingSections.push('PRAZO')
       }
       break
     case 'grading':
@@ -774,7 +728,6 @@ function parseStructuredAnswer(answer: string | undefined): ParsedStructuredAnsw
   const parsed: ParsedStructuredAnswer = {
     direct: '',
     deliverables: [],
-    deadline: [],
     attention: [],
     nextSteps: [],
     extra: [],
@@ -825,7 +778,6 @@ function normalizeSectionKey(value: string): keyof ParsedStructuredAnswer | null
 
   if (/^resposta direta|^resumo em 10 segundos|^resumo rapido/.test(normalized)) return 'direct'
   if (/^o que entregar|^entrega|^entregaveis?/.test(normalized)) return 'deliverables'
-  if (/^prazo|^data/.test(normalized)) return 'deadline'
   if (/^atencao|^ponto de atencao|^riscos?/.test(normalized)) return 'attention'
   if (/^proximo passo|^proximos passos|^checklist|^como fazer|^como comecar|^comece assim/.test(normalized)) return 'nextSteps'
 
@@ -852,14 +804,12 @@ function pushStructuredValue(parsed: ParsedStructuredAnswer, key: keyof ParsedSt
 function formatStructuredAnswer(input: {
   direct: string
   deliverables: string[]
-  deadline: string[]
   attention: string[]
   nextSteps: string[]
 }) {
   return [
     `RESPOSTA DIRETA: ${sanitizeAnswerText(input.direct) || 'Nao encontrei isso no material'}`,
     `O QUE ENTREGAR: ${formatSectionItems(input.deliverables, 'Nao encontrei isso no material')}`,
-    `PRAZO: ${formatSectionItems(input.deadline, 'Nao encontrei isso no material')}`,
     `ATENCAO: ${formatSectionItems(input.attention, 'Nao encontrei isso no material')}`,
     `PROXIMO PASSO: ${formatSectionItems(input.nextSteps, 'Nao encontrei isso no material')}`,
   ].join('\n')
@@ -876,11 +826,7 @@ function formatSectionItems(items: string[], fallback: string) {
 
 function buildSuggestedQuestions(intent: QuestionIntent) {
   if (intent === 'deliverable') {
-    return ['Me faca um checklist', 'Qual e o prazo?', 'O que pode me fazer perder pontos?']
-  }
-
-  if (intent === 'deadline') {
-    return ['O que preciso entregar?', 'Me faca um checklist', 'O que pode me fazer perder pontos?']
+    return ['Me faca um checklist', 'O que pode me fazer perder pontos?', 'Como eu organizo essa entrega?']
   }
 
   if (intent === 'tool_usage') {
@@ -986,19 +932,6 @@ function extractDeliverableSignals(text: string) {
   return dedupeItems(results).filter((item) => item.length <= 120)
 }
 
-function extractDeadlineSignals(text: string) {
-  const normalized = sanitizeAnswerText(text)
-  const results: string[] = []
-
-  const timeMatches = normalized.match(/\b(?:ate|até)?\s*(?:as|às)?\s*\d{1,2}:\d{2}\b/gi) ?? []
-  results.push(...timeMatches.map((item) => sanitizeAnswerText(item).replace(/^ate\s+/i, 'Prazo de entrega ').replace(/^até\s+/i, 'Prazo de entrega ')))
-
-  const dateMatches = normalized.match(/\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/gi) ?? []
-  results.push(...dateMatches.map((item) => `Data mencionada: ${item}`))
-
-  return dedupeItems(results).filter((item) => item.length <= 80)
-}
-
 function extractToolLabel(question: string) {
   const normalized = normalizeText(question)
   if (/\bpython\b/.test(normalized)) return 'Python'
@@ -1025,7 +958,6 @@ function getToolUsageContext(input: {
   ].filter(Boolean).join(' '))
   const requirementText = normalizeText([
     ...(input.topic.agentMemory?.deliverables ?? []),
-    ...(input.topic.agentMemory?.deadlines ?? []),
     ...input.citations.map((item) => item.snippet),
   ].filter(Boolean).join(' '))
   const mentionPattern = toolKey !== 'essa ferramenta' ? new RegExp(`\\b${toolKey}\\b`, 'i') : null
