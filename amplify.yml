@@ -1,6 +1,6 @@
 version: 1
 applications:
-  - appRoot: .
+  - appRoot: apps/web-public
     frontend:
       buildPath: /
       phases:
