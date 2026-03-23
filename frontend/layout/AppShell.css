@@ -70,11 +70,11 @@
 
 .auth-login-card {
   min-height: 0;
-  height: 300px;
+  height: 320px;
 }
 
 .entry-patch-panel {
-  height: 300px;
+  height: 320px;
 }
 
 .auth-login-panel {
@@ -113,7 +113,7 @@
 .auth-login-panel .action-row {
   gap: 8px;
   margin-top: 4px;
-  margin-bottom: 2px;
+  margin-bottom: 0;
 }
 
 .auth-login-panel .primary-button,
