@@ -29,7 +29,7 @@ export const botConfig = {
   downloadsDir: runtimePaths.downloadsDir,
   sessionDir: runtimePaths.sessionDir,
   pollIntervalMs: 15_000,
-  headless: false,
+  headless: readBooleanFlag(process.env.FIAPAUTO_BOT_HEADLESS, false),
 }
 
 export function createDemoJobs(): RecordingJob[] {
@@ -51,4 +51,21 @@ export function createDemoJobs(): RecordingJob[] {
       captureMode: 'mock',
     },
   ]
+}
+
+function readBooleanFlag(value: string | undefined, fallback: boolean) {
+  if (value === undefined) {
+    return fallback
+  }
+
+  const normalized = value.trim().toLowerCase()
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    return true
+  }
+
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    return false
+  }
+
+  return fallback
 }

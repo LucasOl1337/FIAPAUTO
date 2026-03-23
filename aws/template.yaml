@@ -35,16 +35,6 @@ Resources:
           - GET
           - POST
           - OPTIONS
-      Auth:
-        Authorizers:
-          CognitoAuthorizer:
-            IdentitySource: "$request.header.Authorization"
-            JwtConfiguration:
-              issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${ExistingCognitoUserPoolId}
-              audience:
-                - !Ref ExistingCognitoUserPoolClientId
-        DefaultAuthorizer: CognitoAuthorizer
-
   PublicApiFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -68,11 +58,23 @@ Resources:
             ApiId: !Ref PublicApi
             Path: /manifest
             Method: GET
+        ManifestPrefixed:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref PublicApi
+            Path: /api/public/manifest
+            Method: GET
         Topics:
           Type: HttpApi
           Properties:
             ApiId: !Ref PublicApi
             Path: /topics
+            Method: GET
+        TopicsPrefixed:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref PublicApi
+            Path: /api/public/topics
             Method: GET
         TopicDetail:
           Type: HttpApi
@@ -80,11 +82,23 @@ Resources:
             ApiId: !Ref PublicApi
             Path: /topics/{topicId}
             Method: GET
+        TopicDetailPrefixed:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref PublicApi
+            Path: /api/public/topics/{topicId}
+            Method: GET
         TopicChat:
           Type: HttpApi
           Properties:
             ApiId: !Ref PublicApi
             Path: /chat/topic
+            Method: POST
+        TopicChatPrefixed:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref PublicApi
+            Path: /api/public/chat/topic
             Method: POST
         Assets:
           Type: HttpApi
@@ -92,11 +106,23 @@ Resources:
             ApiId: !Ref PublicApi
             Path: /assets
             Method: GET
+        AssetsPrefixed:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref PublicApi
+            Path: /api/public/assets
+            Method: GET
         SyncStatus:
           Type: HttpApi
           Properties:
             ApiId: !Ref PublicApi
             Path: /sync/status
+            Method: GET
+        SyncStatusPrefixed:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref PublicApi
+            Path: /api/public/sync/status
             Method: GET
 
 Outputs:

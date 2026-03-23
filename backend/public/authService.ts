@@ -34,6 +34,39 @@ type PublicAuthState = {
 
 const ACTIVE_DELTA_CAP_SECONDS = 120
 
+export type PublicAuthStore = {
+  signUp: (input: { email: string; password: string }) => Promise<{ token: string; userLabel: string; isGuest: boolean }>
+  signIn: (input: { email: string; password: string }) => Promise<{ token: string; userLabel: string; isGuest: boolean }>
+  signInGuest: () => Promise<{ token: string; userLabel: string; isGuest: boolean }>
+  readSession: (token: string) => Promise<{ token: string; userLabel: string; isGuest: boolean; email: string } | null>
+  touchSession: (token: string) => Promise<{ ok: boolean }>
+  signOutSession: (token: string) => Promise<{ ok: boolean }>
+  listUsers: () => Promise<Array<{
+    id: string
+    email: string
+    password: string
+    createdAt: string
+    updatedAt: string
+    lastLoginAt?: string
+    lastSeenAt?: string
+    signInCount: number
+    totalActiveSeconds: number
+    activeSessions: number
+  }>>
+}
+
+export function createPublicAuthStore(): PublicAuthStore {
+  return {
+    signUp: signUpWithLocalStore,
+    signIn: signInWithLocalStore,
+    signInGuest: signInGuestWithLocalStore,
+    readSession: readSessionFromLocalStore,
+    touchSession: touchSessionInLocalStore,
+    signOutSession: signOutSessionFromLocalStore,
+    listUsers: listUsersFromLocalStore,
+  }
+}
+
 async function readState(): Promise<PublicAuthState> {
   const [users, sessions] = await Promise.all([
     readJsonFile<PublicAuthUser[]>(runtimePaths.publicAuthUsersFile, []),
@@ -99,6 +132,10 @@ function touchSessionAndUser(state: PublicAuthState, session: PublicAuthSession)
 }
 
 export async function signUpPublicUser(input: { email: string; password: string }) {
+  return createPublicAuthStore().signUp(input)
+}
+
+async function signUpWithLocalStore(input: { email: string; password: string }) {
   const email = normalizeEmail(input.email)
   const password = input.password.trim()
   if (!email || password.length < 4) {
@@ -141,6 +178,10 @@ export async function signUpPublicUser(input: { email: string; password: string 
 }
 
 export async function signInPublicUser(input: { email: string; password: string }) {
+  return createPublicAuthStore().signIn(input)
+}
+
+async function signInWithLocalStore(input: { email: string; password: string }) {
   const email = normalizeEmail(input.email)
   const password = input.password
   const state = await readState()
@@ -172,6 +213,10 @@ export async function signInPublicUser(input: { email: string; password: string 
 }
 
 export async function signInPublicGuest() {
+  return createPublicAuthStore().signInGuest()
+}
+
+async function signInGuestWithLocalStore() {
   const state = await readState()
   const session = createSession({
     userId: null,
@@ -189,6 +234,10 @@ export async function signInPublicGuest() {
 }
 
 export async function readPublicSession(token: string) {
+  return createPublicAuthStore().readSession(token)
+}
+
+async function readSessionFromLocalStore(token: string) {
   const normalizedToken = token.trim()
   if (!normalizedToken) {
     return null
@@ -212,6 +261,10 @@ export async function readPublicSession(token: string) {
 }
 
 export async function touchPublicSession(token: string) {
+  return createPublicAuthStore().touchSession(token)
+}
+
+async function touchSessionInLocalStore(token: string) {
   const normalizedToken = token.trim()
   if (!normalizedToken) {
     return { ok: false }
@@ -229,6 +282,10 @@ export async function touchPublicSession(token: string) {
 }
 
 export async function signOutPublicSession(token: string) {
+  return createPublicAuthStore().signOutSession(token)
+}
+
+async function signOutSessionFromLocalStore(token: string) {
   const normalizedToken = token.trim()
   if (!normalizedToken) {
     return { ok: true }
@@ -248,6 +305,10 @@ export async function signOutPublicSession(token: string) {
 }
 
 export async function listPublicUsersForAdmin() {
+  return createPublicAuthStore().listUsers()
+}
+
+async function listUsersFromLocalStore() {
   const state = await readState()
 
   return state.users.map((user) => {

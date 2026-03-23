@@ -24,13 +24,12 @@ export function UserAuthGate({ children }: UserAuthGateProps) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
-  const [ready, setReady] = useState(false)
+  const [ready, setReady] = useState(() => !isAuthRequired())
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
 
   useEffect(() => {
     if (!isAuthRequired()) {
-      setReady(true)
       return
     }
 

@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.930.0",
+    "@fiapauto/contracts": "0.2.0",
     "@fiapauto/bots": "0.2.0"
   },
   "scripts": {

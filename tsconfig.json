@@ -1,8 +1,13 @@
 {
   "files": [],
   "references": [
-    { "path": "./frontend" },
+    { "path": "./packages/contracts" },
+    { "path": "./packages/server-core" },
     { "path": "./backend" },
-    { "path": "./backend/bots" }
+    { "path": "./backend/bots" },
+    { "path": "./services/public-api" },
+    { "path": "./services/admin-api" },
+    { "path": "./apps/web-public" },
+    { "path": "./apps/web-admin" }
   ]
 }

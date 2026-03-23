@@ -13,10 +13,10 @@ import type {
   TopicLearning,
   TopicSummaryResult,
   ValidatedAnswerEntry,
-} from '@fiapauto/backend/contracts'
+} from '@fiapauto/contracts'
 import type { Lesson, WorkspaceState } from '../types.ts'
 
-const BOT_API_PORT = (import.meta.env.VITE_API_PORT?.trim() || import.meta.env.VITE_PUBLIC_API_PORT?.trim() || '')
+const BOT_API_PORT = (import.meta.env.VITE_ADMIN_API_PORT?.trim() || import.meta.env.VITE_API_PORT?.trim() || '')
 const BOT_API_BASE = (resolveBotApiBase() ?? '').replace(/\/+$/, '')
 const ADMIN_TOKEN_STORAGE_KEY = 'fiapauto.admin-token.v1'
 
@@ -30,7 +30,7 @@ function resolveBotApiBase() {
     return runtimeLocalBase
   }
 
-  return import.meta.env.VITE_API_BASE_URL ?? ''
+  return import.meta.env.VITE_ADMIN_API_BASE_URL ?? import.meta.env.VITE_API_BASE_URL ?? ''
 }
 
 function resolveRuntimeLocalApiBase() {

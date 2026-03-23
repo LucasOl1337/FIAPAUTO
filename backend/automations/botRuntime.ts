@@ -14,7 +14,7 @@ import {
   type RecordingJob,
   type TeamsWorkspaceReport,
 } from '@fiapauto/bots'
-import type { BotStatusPayload } from '../apis/contracts/index.ts'
+import type { BotStatusPayload } from '@fiapauto/contracts'
 import { JsonJobRepository } from '../database/JsonJobRepository.ts'
 import { ReadyLessonStore } from '../database/ReadyLessonStore.ts'
 import { TeamsWorkspaceStore } from '../database/TeamsWorkspaceStore.ts'

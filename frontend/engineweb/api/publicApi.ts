@@ -4,7 +4,7 @@ import type {
   PublicTopic,
   PublicTopicListItem,
   PublicSyncStatus,
-} from '@fiapauto/backend/contracts'
+} from '@fiapauto/contracts'
 import { resolvePublicApiBase } from '../publicApiBase.ts'
 
 const PUBLIC_API_BASE = resolvePublicApiBase()
@@ -32,6 +32,19 @@ export type PublicTopicChatResult = {
 
 function buildPublicApiUrl(path: string) {
   return PUBLIC_API_BASE ? `${PUBLIC_API_BASE}${path}` : path
+}
+
+function buildPublicApiCandidateUrls(path: string) {
+  if (!PUBLIC_API_BASE) {
+    return [buildPublicApiUrl(path)]
+  }
+
+  const candidates = [buildPublicApiUrl(path)]
+  if (path.startsWith('/api/public/')) {
+    candidates.push(buildPublicApiUrl(path.replace('/api/public', '')))
+  }
+
+  return [...new Set(candidates)]
 }
 
 function buildStaticPublicUrl(path: string) {
@@ -183,30 +196,33 @@ async function fetchPublicApiWithRetry(
   const attempts = Math.max(1, options?.attempts ?? 3)
   const timeoutMs = Math.max(1000, options?.timeoutMs ?? PUBLIC_API_TIMEOUT_MS)
   let lastError: unknown
+  const candidateUrls = buildPublicApiCandidateUrls(path)
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const controller = new AbortController()
-    const timeoutId = window.setTimeout(() => controller.abort('public_api_timeout'), timeoutMs)
+    for (const url of candidateUrls) {
+      const controller = new AbortController()
+      const timeoutId = window.setTimeout(() => controller.abort('public_api_timeout'), timeoutMs)
 
-    try {
-      const response = await fetch(buildPublicApiUrl(path), {
-        cache: 'no-store',
-        ...init,
-        signal: controller.signal,
-      })
-      if (!isTransientPublicApiStatus(response.status) || attempt === attempts - 1) {
-        return response
+      try {
+        const response = await fetch(url, {
+          cache: 'no-store',
+          ...init,
+          signal: controller.signal,
+        })
+        if (!isTransientPublicApiStatus(response.status) || attempt === attempts - 1) {
+          return response
+        }
+      } catch (error) {
+        lastError = error
+        if (error instanceof DOMException && error.name === 'AbortError' && attempt === attempts - 1) {
+          throw new Error('public_api_timeout')
+        }
+        if (attempt === attempts - 1) {
+          throw error
+        }
+      } finally {
+        window.clearTimeout(timeoutId)
       }
-    } catch (error) {
-      lastError = error
-      if (error instanceof DOMException && error.name === 'AbortError' && attempt === attempts - 1) {
-        throw new Error('public_api_timeout')
-      }
-      if (attempt === attempts - 1) {
-        throw error
-      }
-    } finally {
-      window.clearTimeout(timeoutId)
     }
 
     await delay(350 * (attempt + 1))

@@ -6,7 +6,7 @@ import type { LlmDocument, LlmImage } from '../connections/llm/llmClient.ts'
 import { appendLlmDebugEvent } from '../connections/llm/llmDebugStore.ts'
 import { routeAssistantChat } from '../connections/llm/providerRouter.ts'
 import { classifyQuestionIntent, type QuestionIntent } from '../engine/questionIntentClassifier.ts'
-import type { PublicChatResponse, PublicTopic, PublishedKnowledgeChunk } from '../apis/contracts/index.ts'
+import type { PublicChatResponse, PublicTopic, PublishedKnowledgeChunk } from '@fiapauto/contracts'
 import { readJsonFile, writeJsonFile } from '../database/fs.ts'
 import { appendPublicChatTraceEvent, buildPublicTraceEvent } from './monitorStore.ts'
 
@@ -91,7 +91,7 @@ export async function answerPublishedTopicQuestion(input: {
   const images = shouldAttachTopicImages(input.question) ? await readTopicImages(input.topic) : []
   const traceContext = input.traceContext
   const startedAt = Date.now()
-  let lastLlmPrompt = prompt
+  const lastLlmPrompt = prompt
   let lastLlmOutput = ''
 
   try {

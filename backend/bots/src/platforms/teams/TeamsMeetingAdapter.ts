@@ -33,6 +33,7 @@ const ASSIGNMENT_TABS: Array<{ label: RegExp; status: AssignmentTabStatus }> = [
   { label: /em atraso|late|overdue/i, status: 'late' },
   { label: /concluida|completed/i, status: 'completed' },
 ]
+const DEFAULT_TEAMS_WORKSPACE_URL = 'https://teams.microsoft.com/v2/'
 
 export class TeamsMeetingAdapter {
   private static sessionContext: BrowserContext | null = null
@@ -106,7 +107,7 @@ export class TeamsMeetingAdapter {
     await this.logger.info('Abrindo sessao persistente do Teams')
     const context = await this.getOrCreateSessionContext()
     const page = await this.getPrimaryPage(context)
-    await page.goto('https://teams.microsoft.com/v2/', { waitUntil: 'domcontentloaded' })
+    await page.goto(resolveTeamsWorkspaceUrl(), { waitUntil: 'domcontentloaded' })
     await page.bringToFront().catch(() => null)
 
     if (await this.isAuthenticated(page)) {
@@ -131,7 +132,7 @@ export class TeamsMeetingAdapter {
     await this.logger.info('Abrindo janela do Teams para login manual')
     const context = await this.getOrCreateSessionContext()
     const page = await this.getPrimaryPage(context)
-    await page.goto('https://teams.microsoft.com/v2/', { waitUntil: 'domcontentloaded' })
+    await page.goto(resolveTeamsWorkspaceUrl(), { waitUntil: 'domcontentloaded' })
     await page.bringToFront().catch(() => null)
     await page.waitForTimeout(1_000)
 
@@ -148,7 +149,7 @@ export class TeamsMeetingAdapter {
     await this.logger.info('Iniciando varredura do Teams')
     const context = await this.getOrCreateSessionContext()
     const page = await this.getPrimaryPage(context)
-    await page.goto('https://teams.microsoft.com/v2/', { waitUntil: 'domcontentloaded' })
+    await page.goto(resolveTeamsWorkspaceUrl(), { waitUntil: 'domcontentloaded' })
     await page.bringToFront().catch(() => null)
     await page.waitForTimeout(3_000)
 
@@ -166,7 +167,7 @@ export class TeamsMeetingAdapter {
     try {
       const context = await this.getOrCreateSessionContext()
       const page = await this.getPrimaryPage(context)
-      await page.goto('https://teams.microsoft.com/v2/', { waitUntil: 'domcontentloaded' })
+      await page.goto(resolveTeamsWorkspaceUrl(), { waitUntil: 'domcontentloaded' })
       await page.waitForTimeout(1_500)
 
       return (await this.isAuthenticated(page)) ? 'authenticated' : 'login_required'
@@ -1250,4 +1251,9 @@ function normalizeText(value: string) {
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim()
+}
+
+function resolveTeamsWorkspaceUrl() {
+  const explicit = process.env.FIAPAUTO_TEAMS_BASE_URL?.trim()
+  return explicit || DEFAULT_TEAMS_WORKSPACE_URL
 }

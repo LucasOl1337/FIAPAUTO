@@ -6,7 +6,7 @@ import type {
   PublicModelWarning,
   PublicMonitorStatus,
   PublicTrafficSnapshot,
-} from '../apis/contracts/index.ts'
+} from '@fiapauto/contracts'
 import { runtimePaths } from '../config/runtimePaths.ts'
 import { ensureDir, readJsonFile, writeJsonFile } from '../database/fs.ts'
 

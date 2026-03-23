@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
-import type { LlmDebugEvent } from '../../apis/contracts/index.ts'
+import type { LlmDebugEvent } from '@fiapauto/contracts'
 import { runtimePaths } from '../../config/runtimePaths.ts'
 import {
   appendLlmDebugEvent,

@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import type { LlmDebugEvent } from '../../apis/contracts/index.ts'
+import type { LlmDebugEvent } from '@fiapauto/contracts'
 import { runtimePaths } from '../../config/runtimePaths.ts'
 
 const outputDir = runtimePaths.logsDir

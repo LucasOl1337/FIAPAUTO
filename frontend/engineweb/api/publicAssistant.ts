@@ -1,4 +1,4 @@
-import type { PublicChatResponse, PublicTopic, PublishedKnowledgeChunk } from '@fiapauto/backend/contracts'
+import type { PublicChatResponse, PublicTopic, PublishedKnowledgeChunk } from '@fiapauto/contracts'
 
 type Citation = PublicChatResponse['citations'][number]
 type ParsedStructuredAnswer = {

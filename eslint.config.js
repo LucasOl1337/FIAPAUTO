@@ -13,7 +13,7 @@ export default defineConfig([
     '__pycache__',
   ]),
   {
-    files: ['frontend/**/*.{ts,tsx}'],
+    files: ['frontend/**/*.{ts,tsx}', 'apps/**/*.{ts,tsx}', 'packages/**/*.{ts,tsx}'],
     extends: [
       js.configs.recommended,
       tseslint.configs.recommended,
@@ -26,7 +26,7 @@ export default defineConfig([
     },
   },
   {
-    files: ['backend/**/*.ts'],
+    files: ['backend/**/*.ts', 'services/**/*.ts'],
     extends: [js.configs.recommended, tseslint.configs.recommended],
     languageOptions: {
       ecmaVersion: 2020,

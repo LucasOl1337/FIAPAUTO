@@ -8,7 +8,7 @@ import {
   S3Client,
   type _Object,
 } from '@aws-sdk/client-s3'
-import type { PublicManifest } from '../apis/contracts/index.ts'
+import type { PublicManifest } from '@fiapauto/contracts'
 import { runtimePaths } from '../config/runtimePaths.ts'
 import { ensureDir } from '../database/fs.ts'
 import { getLocalPublishStatus, preparePublicBundle, readCurrentLocalManifest } from './service.ts'

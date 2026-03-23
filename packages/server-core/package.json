@@ -1,0 +1,27 @@
+{
+  "name": "@fiapauto/server-core",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "exports": {
+    "./config/loadEnv": "./src/config/loadEnv.ts",
+    "./config/runtimePaths": "./src/config/runtimePaths.ts",
+    "./database/fs": "./src/database/fs.ts",
+    "./public/assistant": "./src/public/assistant.ts",
+    "./public/auth": "./src/public/auth.ts",
+    "./public/monitorStore": "./src/public/monitorStore.ts",
+    "./public/service": "./src/public/service.ts",
+    "./publish/service": "./src/publish/service.ts",
+    "./cloud/s3PublishedStore": "./src/cloud/s3PublishedStore.ts",
+    "./connections/llm/llmClient": "./src/connections/llm/llmClient.ts",
+    "./connections/llm/llmDebugStore": "./src/connections/llm/llmDebugStore.ts",
+    "./connections/llm/providerRouter": "./src/connections/llm/providerRouter.ts",
+    "./engine/questionIntentClassifier": "./src/engine/questionIntentClassifier.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@fiapauto/contracts": "0.2.0"
+  }
+}

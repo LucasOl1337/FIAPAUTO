@@ -7,36 +7,37 @@ import type {
   PublicTopic,
   PublicTopicListItem,
   PublishedKnowledgeChunk,
-} from '../apis/contracts/index.ts'
+} from '@fiapauto/contracts'
 import { frontendPaths, runtimePaths } from '../config/runtimePaths.ts'
 import { getLocalPublishStatus, readCurrentLocalChunks, readCurrentLocalManifest, readCurrentLocalTopic, readCurrentLocalTopicList } from '../publish/service.ts'
 import { answerPublishedTopicQuestion, type PublicTraceContext } from './assistant.ts'
 import { getPublicMonitorStatus } from './monitorStore.ts'
 
 const frontendPublishedDir = path.join(frontendPaths.frontendRootDir, 'public', 'published')
+const configuredPublishedSource = normalizePublishedSource(process.env.FIAPAUTO_PUBLISHED_SOURCE)
+
+export type PublishedStore = {
+  readManifest: () => Promise<PublicManifest | null>
+  readTopics: () => Promise<PublicTopicListItem[]>
+  readTopic: (topicId: string) => Promise<PublicTopic | null>
+  readChunks: () => Promise<PublishedKnowledgeChunk[]>
+  readAsset: (key: string) => Promise<{ buffer: Buffer; contentType: string }>
+}
+
+export function createPublishedStore(source = configuredPublishedSource): PublishedStore {
+  return source === 'runtime' ? createRuntimePublishedStore() : createRepoPublishedStore()
+}
 
 export async function getPublishedManifest() {
-  const runtimeManifest = await readCurrentLocalManifest()
-  if (runtimeManifest) {
-    return runtimeManifest
-  }
-
-  return readFrontendPublishedJson<PublicManifest | null>('manifest.json', null)
+  return createPublishedStore().readManifest()
 }
 
 export async function listPublishedTopics() {
-  const runtimeTopics = await readCurrentLocalTopicList()
-  if (runtimeTopics.length > 0) {
-    return runtimeTopics
-  }
-
-  return readFrontendPublishedJson<PublicTopicListItem[]>('topics.json', [])
+  return createPublishedStore().readTopics()
 }
 
 export async function getPublishedTopic(topicId: string) {
-  const topic =
-    (await readCurrentLocalTopic(topicId)) ??
-    (await readFrontendPublishedJson<PublicTopic | null>(path.join('topics', `${topicId}.json`), null))
+  const topic = await createPublishedStore().readTopic(topicId)
   if (!topic) {
     throw new Error('public_topic_not_found')
   }
@@ -45,12 +46,12 @@ export async function getPublishedTopic(topicId: string) {
 }
 
 export async function askPublishedTopic(input: { topicId: string; question: string; traceContext?: PublicTraceContext }) {
-  const topic = await getPublishedTopic(input.topicId)
-  const runtimeChunks = await readCurrentLocalChunks()
-  const chunks =
-    runtimeChunks.length > 0
-      ? runtimeChunks
-      : await readFrontendPublishedJson<PublishedKnowledgeChunk[]>(path.join('knowledge', 'chunks.json'), [])
+  const store = createPublishedStore()
+  const topic = await store.readTopic(input.topicId)
+  if (!topic) {
+    throw new Error('public_topic_not_found')
+  }
+  const chunks = await store.readChunks()
   return answerPublishedTopicQuestion({
     topic,
     chunks,
@@ -60,29 +61,7 @@ export async function askPublishedTopic(input: { topicId: string; question: stri
 }
 
 export async function readPublishedAsset(key: string) {
-  const sanitizedKey = key.replace(/^\/+/, '')
-  const roots = [runtimePaths.publicCurrentDir, frontendPublishedDir]
-
-  for (const rootDir of roots) {
-    const resolved = path.resolve(rootDir, ...sanitizedKey.split('/'))
-    const root = path.resolve(rootDir)
-
-    if (!resolved.startsWith(root)) {
-      continue
-    }
-
-    try {
-      const buffer = await fs.readFile(resolved)
-      return {
-        buffer,
-        contentType: guessMimeType(resolved),
-      }
-    } catch {
-      // Try next root.
-    }
-  }
-
-  throw new Error('public_asset_not_found')
+  return createPublishedStore().readAsset(key)
 }
 
 export async function getPublishedSyncStatus() {
@@ -102,6 +81,30 @@ export type {
   PublishedKnowledgeChunk,
 }
 
+function createRepoPublishedStore(): PublishedStore {
+  return {
+    readManifest: () => readFrontendPublishedJson<PublicManifest | null>('manifest.json', null),
+    readTopics: () => readFrontendPublishedJson<PublicTopicListItem[]>('topics.json', []),
+    readTopic: (topicId) => readFrontendPublishedJson<PublicTopic | null>(path.join('topics', `${topicId}.json`), null),
+    readChunks: () => readFrontendPublishedJson<PublishedKnowledgeChunk[]>(path.join('knowledge', 'chunks.json'), []),
+    readAsset: (key) => readPublishedAssetFromRoot(frontendPublishedDir, key),
+  }
+}
+
+function createRuntimePublishedStore(): PublishedStore {
+  return {
+    readManifest: () => readCurrentLocalManifest(),
+    readTopics: () => readCurrentLocalTopicList(),
+    readTopic: (topicId) => readCurrentLocalTopic(topicId),
+    readChunks: () => readCurrentLocalChunks(),
+    readAsset: (key) => readPublishedAssetFromRoot(runtimePaths.publicCurrentDir, key),
+  }
+}
+
+function normalizePublishedSource(value: string | undefined) {
+  return value?.trim().toLowerCase() === 'runtime' ? 'runtime' : 'repo'
+}
+
 function guessMimeType(filePath: string) {
   const extension = path.extname(filePath).toLowerCase()
   if (extension === '.png') return 'image/png'
@@ -111,6 +114,22 @@ function guessMimeType(filePath: string) {
   if (extension === '.json') return 'application/json; charset=utf-8'
   if (extension === '.txt') return 'text/plain; charset=utf-8'
   return 'application/octet-stream'
+}
+
+async function readPublishedAssetFromRoot(rootDir: string, key: string) {
+  const sanitizedKey = key.replace(/^\/+/, '')
+  const resolved = path.resolve(rootDir, ...sanitizedKey.split('/'))
+  const root = path.resolve(rootDir)
+
+  if (!resolved.startsWith(root)) {
+    throw new Error('public_asset_not_found')
+  }
+
+  const buffer = await fs.readFile(resolved)
+  return {
+    buffer,
+    contentType: guessMimeType(resolved),
+  }
 }
 
 async function readFrontendPublishedJson<T>(relativePath: string, fallback: T): Promise<T> {

@@ -13,7 +13,7 @@ import type {
   PublicTopicListItem,
   PublishedKnowledgeChunk,
   TopicAttachment,
-} from '../apis/contracts/index.ts'
+} from '@fiapauto/contracts'
 
 type CurrentReleasePointer = {
   releaseId: string
@@ -326,7 +326,7 @@ async function replaceCurrentBundle(releaseDir: string, releaseId: string) {
 
   try {
     await fs.rename(stagingDir, runtimePaths.publicCurrentDir)
-  } catch (error) {
+  } catch {
     try {
       await fs.rm(runtimePaths.publicCurrentDir, { recursive: true, force: true })
     } catch {

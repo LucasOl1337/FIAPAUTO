@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { botConfig } from '@fiapauto/bots'
-import type { LibraryMatch, LibrarySourceType, ValidatedAnswerEntry } from '../apis/contracts/index.ts'
+import type { LibraryMatch, LibrarySourceType, ValidatedAnswerEntry } from '@fiapauto/contracts'
 import { ensureDir, readJsonFile, writeJsonFile } from '../database/fs.ts'
 import { syncTopicsFromAssignments, type SubjectTopic } from './subjectTopics.ts'
 

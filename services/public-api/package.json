@@ -1,0 +1,14 @@
+{
+  "name": "@fiapauto/public-api",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/server.ts",
+    "build": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@fiapauto/contracts": "0.2.0",
+    "@fiapauto/server-core": "0.2.0"
+  }
+}

@@ -122,6 +122,17 @@ function normalizeAuthMode(value: string | undefined): PublicAuthMode {
     return 'none'
   }
 
+  if (value === 'local') {
+    return 'local'
+  }
+
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname?.trim() ?? ''
+    if (hostname && !isSafeLocalHost(hostname)) {
+      return 'none'
+    }
+  }
+
   return 'local'
 }
 
@@ -223,6 +234,18 @@ function clearLocalAuthToken() {
   }
 
   window.localStorage.removeItem(LOCAL_AUTH_TOKEN_KEY)
+}
+
+function isLoopbackHost(hostname: string) {
+  return /^(127\.0\.0\.1|localhost)$/i.test(hostname)
+}
+
+function isPrivateLanHost(hostname: string) {
+  return /^(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})$/i.test(hostname)
+}
+
+function isSafeLocalHost(hostname: string) {
+  return isLoopbackHost(hostname) || isPrivateLanHost(hostname)
 }
 
 function buildOfflineGuestSession() {

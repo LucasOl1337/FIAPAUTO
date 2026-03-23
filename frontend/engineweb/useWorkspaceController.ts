@@ -30,7 +30,7 @@ import {
 import { initialWorkspaceState } from './state/demoData.ts'
 import { loadWorkspaceState, resetWorkspaceState, saveWorkspaceState } from './state/storage.ts'
 import type { WorkspaceState } from './types.ts'
-import type { PublicTopic, PublicTopicListItem } from '@fiapauto/backend/contracts'
+import type { PublicTopic, PublicTopicListItem } from '@fiapauto/contracts'
 
 export function useWorkspaceController(appMode: 'admin' | 'user') {
   const [workspace, setWorkspace] = useState<WorkspaceState>(() => loadWorkspaceState())
@@ -58,6 +58,12 @@ export function useWorkspaceController(appMode: 'admin' | 'user') {
   const refreshBotStatusEvent = useEffectEvent((showMessage = false) => {
     void refreshBotStatus(showMessage)
   })
+  const loadTopicsEvent = useEffectEvent((showMessage = false) => {
+    void loadTopics(showMessage)
+  })
+  const loadTopicDetailEvent = useEffectEvent((topicId: string) => {
+    void loadTopicDetail(topicId)
+  })
 
   useEffect(() => {
     saveWorkspaceState(workspace)
@@ -69,7 +75,7 @@ export function useWorkspaceController(appMode: 'admin' | 'user') {
       return
     }
 
-    void loadTopics(false)
+    loadTopicsEvent(false)
   }, [appMode])
 
   useEffect(() => {
@@ -104,7 +110,7 @@ export function useWorkspaceController(appMode: 'admin' | 'user') {
       return
     }
 
-    void loadTopicDetail(selectedTopicId)
+    loadTopicDetailEvent(selectedTopicId)
   }, [selectedTopicId, appMode])
 
   const importedLessons = useMemo(
@@ -593,7 +599,7 @@ function normalizeSummarySectionText(label: string, value: string) {
   }
 
   return cleanTopicDisplayText(value)
-    .replace(/^Prazo de entrega Ã s?\s*/i, '')
+    .replace(/^Prazo de entrega as?\s*/i, '')
     .replace(/^Prazo de entrega\s*/i, '')
     .replace(/^Titulo:\s*/i, '')
     .trim()

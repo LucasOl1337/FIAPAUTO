@@ -1,4 +1,4 @@
-import type { PublicChatResponse, PublicTopic, PublishedKnowledgeChunk } from '@fiapauto/backend/contracts'
+import type { PublicChatResponse, PublicTopic, PublishedKnowledgeChunk } from '@fiapauto/contracts'
 
 const OLLAMA_API_KEY = import.meta.env.VITE_OLLAMA_API_KEY?.trim() ?? ''
 const OLLAMA_BASE_URL = (import.meta.env.VITE_OLLAMA_BASE_URL?.trim() || 'https://ollama.com').replace(/\/+$/, '')

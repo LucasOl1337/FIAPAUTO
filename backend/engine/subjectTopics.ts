@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { botConfig, type AssignmentItem } from '@fiapauto/bots'
-import type { TopicDebugResult, ValidatedAnswerEntry } from '../apis/contracts/index.ts'
+import type { TopicDebugResult, ValidatedAnswerEntry } from '@fiapauto/contracts'
 import { ensureDir, readJsonFile, writeJsonFile } from '../database/fs.ts'
 import { readLlmDebugHistory } from '../connections/llm/llmDebugStore.ts'
 import {
@@ -190,7 +190,7 @@ export async function syncTopicsFromAssignments() {
     const summaryState = await readStoredSummary(topicId)
     const memoryState = await readStoredMemory(topicId)
     const learningState = await readStoredLearning(topicId)
-    const normalizedSummary = normalizePersistedSummary(summaryState.summary ?? previous?.summary ?? '', assignment.dueText)
+    const normalizedSummary = normalizePersistedSummary(summaryState.summary ?? previous?.summary ?? '')
     if (summaryState.summary && normalizedSummary && normalizedSummary !== summaryState.summary) {
       await writeSummaryFile(topicId, {
         summary: normalizedSummary,
@@ -333,7 +333,7 @@ export async function generateTopicSummary(
   })
 
   const generatedAt = new Date().toISOString()
-  const summary = normalizePersistedSummary(response.content.trim() || buildDeterministicSummary(topic), topic.dueText)
+  const summary = normalizePersistedSummary(response.content.trim() || buildDeterministicSummary(topic))
 
   await writeSummaryFile(topic.id, {
     summary,
@@ -1140,7 +1140,7 @@ function normalizeAssistantAnswer(value: string) {
     .trim()
 }
 
-function normalizePersistedSummary(summary: string, _dueText?: string) {
+function normalizePersistedSummary(summary: string) {
   const lines = summary
     .split(/\n+/)
     .map((item) => item.trim())
@@ -1487,6 +1487,7 @@ function collectPenaltyLearningTips(topic: SubjectTopic, memory: TopicAgentMemor
   }
 
   if (/atraso superior a 15 minutos|15 minutos ap[oó]s/i.test(candidates)) {
+    // Keep this rule documented but do not surface a generic tip for it.
   }
 
   if (/nota zero|aus[eê]ncia na oral|aus[eê]ncia de qualquer membro/i.test(candidates)) {

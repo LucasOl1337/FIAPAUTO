@@ -8,7 +8,7 @@ const __dirname = path.dirname(__filename)
 export const backendRootDir = path.resolve(__dirname, '..')
 export const repoRootDir = path.resolve(backendRootDir, '..')
 
-const runtimeDir = path.join(backendRootDir, 'runtime')
+const runtimeDir = path.resolve(process.env.FIAPAUTO_DATA_DIR?.trim() || path.join(backendRootDir, 'runtime'))
 const desktopKeysDir = path.join(os.homedir(), 'Desktop', 'KEYS')
 const publicSyncDir = path.join(runtimeDir, 'public-sync')
 

@@ -8,34 +8,26 @@ type HttpEvent = {
     http?: {
       method?: string
     }
-    authorizer?: {
-      jwt?: {
-        claims?: Record<string, string>
-      }
-    }
   }
   body?: string | null
 }
 
 export async function handler(event: HttpEvent) {
-  if (!event.requestContext?.authorizer?.jwt?.claims?.sub) {
-    return json(401, { error: 'unauthorized' })
-  }
-
   const store = createPublishedS3Store()
   const method = event.requestContext?.http?.method || 'GET'
   const url = new URL(`https://fiapauto.local${event.rawPath}${event.rawQueryString ? `?${event.rawQueryString}` : ''}`)
+  const normalizedPath = normalizePublicPath(url.pathname)
 
   try {
-    if (method === 'GET' && url.pathname === '/manifest') {
+    if (method === 'GET' && normalizedPath === '/manifest') {
       return json(200, await store.readManifest())
     }
 
-    if (method === 'GET' && url.pathname === '/topics') {
+    if (method === 'GET' && normalizedPath === '/topics') {
       return json(200, await store.readTopics())
     }
 
-    if (method === 'GET' && url.pathname === '/sync/status') {
+    if (method === 'GET' && normalizedPath === '/sync/status') {
       const manifest = await store.readManifest()
       return json(200, {
         localReleaseId: undefined,
@@ -48,7 +40,7 @@ export async function handler(event: HttpEvent) {
       })
     }
 
-    if (method === 'GET' && url.pathname === '/assets') {
+    if (method === 'GET' && normalizedPath === '/assets') {
       const key = url.searchParams.get('key')?.trim() ?? ''
       if (!key) {
         return json(400, { error: 'asset_key_required' })
@@ -66,7 +58,7 @@ export async function handler(event: HttpEvent) {
       }
     }
 
-    if (method === 'POST' && url.pathname === '/chat/topic') {
+    if (method === 'POST' && normalizedPath === '/chat/topic') {
       const parsed = JSON.parse(event.body || '{}') as { topicId?: string; question?: string }
       if (!parsed.topicId) {
         return json(400, { error: 'topic_id_required' })
@@ -83,7 +75,7 @@ export async function handler(event: HttpEvent) {
       }))
     }
 
-    const topicMatch = url.pathname.match(/^\/topics\/([^/]+)$/)
+    const topicMatch = normalizedPath.match(/^\/topics\/([^/]+)$/)
     if (method === 'GET' && topicMatch) {
       return json(200, await store.readTopic(decodeURIComponent(topicMatch[1]!)))
     }
@@ -92,6 +84,18 @@ export async function handler(event: HttpEvent) {
   } catch (error) {
     return json(500, { error: error instanceof Error ? error.message : 'unknown_error' })
   }
+}
+
+function normalizePublicPath(pathname: string) {
+  if (pathname === '/api/public' || pathname === '/api/public/') {
+    return '/'
+  }
+
+  if (pathname.startsWith('/api/public/')) {
+    return pathname.slice('/api/public'.length)
+  }
+
+  return pathname
 }
 
 function json(statusCode: number, body: unknown) {

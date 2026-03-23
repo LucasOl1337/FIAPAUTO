@@ -1,6 +1,6 @@
 version: 1
 applications:
-  - appRoot: frontend
+  - appRoot: .
     frontend:
       buildPath: /
       phases:
@@ -9,12 +9,13 @@ applications:
             - npm ci --include=dev
         build:
           commands:
-            - npm run build -w @fiapauto/frontend
+            - npm run build -w @fiapauto/contracts
+            - npm run build -w @fiapauto/web-public
       artifacts:
-        baseDirectory: frontend/dist
+        baseDirectory: apps/web-public/dist
         files:
           - '**/*'
       cache:
         paths:
           - node_modules/**/*
-          - frontend/node_modules/**/*
+          - apps/web-public/node_modules/**/*

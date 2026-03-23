@@ -54,7 +54,7 @@ Stop-PortOwner $apiPort
 
 Remove-Item $apiLog, $apiErrLog, $tunnelLog, $tunnelErrLog -ErrorAction SilentlyContinue
 
-$apiCommand = '$env:FIAPAUTO_API_PORT="43878"; $env:FIAPAUTO_API_HOST="127.0.0.1"; npm run dev:api'
+$apiCommand = '$env:FIAPAUTO_PUBLIC_API_PORT="43878"; $env:FIAPAUTO_PUBLIC_API_HOST="127.0.0.1"; $env:FIAPAUTO_PUBLISHED_SOURCE="repo"; npm run dev:api:public'
 $apiProcess = Start-Process `
   -FilePath 'powershell.exe' `
   -ArgumentList '-NoLogo', '-NoProfile', '-Command', $apiCommand `

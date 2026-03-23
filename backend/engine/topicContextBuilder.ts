@@ -1,5 +1,5 @@
 import type { SubjectTopic, TopicAgentMemory } from './subjectTopics.ts'
-import type { LibraryMatch, LibrarySourceType } from '../apis/contracts/index.ts'
+import type { LibraryMatch, LibrarySourceType } from '@fiapauto/contracts'
 import {
   searchKnowledgeChunks,
   searchKnowledgeLibrary,

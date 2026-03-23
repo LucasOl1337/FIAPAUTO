@@ -4,7 +4,7 @@ import type {
   PublicTopic,
   PublicTopicListItem,
   PublishedKnowledgeChunk,
-} from '../apis/contracts/index.ts'
+} from '@fiapauto/contracts'
 
 const bucket = process.env.FIAPAUTO_PUBLIC_BUCKET?.trim() ?? ''
 const region = process.env.FIAPAUTO_AWS_REGION?.trim() ?? process.env.AWS_REGION?.trim() ?? ''
