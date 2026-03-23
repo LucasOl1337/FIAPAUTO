@@ -170,12 +170,19 @@ function clearLocalSession() {
 }
 
 export async function signInAsVisitor() {
-  const session = await requestLocalAuth<{ token: string; userLabel: string; isGuest: boolean; email?: string }>('/api/public/auth/guest', {
-    method: 'POST',
-  })
-  writeLocalAuthToken(session.token)
-  writeLocalSession({ email: session.email || session.userLabel, userLabel: session.userLabel, isGuest: session.isGuest })
-  return session.userLabel
+  try {
+    const session = await requestLocalAuth<{ token: string; userLabel: string; isGuest: boolean; email?: string }>('/api/public/auth/guest', {
+      method: 'POST',
+    })
+    writeLocalAuthToken(session.token)
+    writeLocalSession({ email: session.email || session.userLabel, userLabel: session.userLabel, isGuest: session.isGuest })
+    return session.userLabel
+  } catch {
+    const fallbackSession = buildOfflineGuestSession()
+    clearLocalAuthToken()
+    writeLocalSession(fallbackSession)
+    return fallbackSession.userLabel
+  }
 }
 
 export async function pingCurrentUserActivity() {
@@ -216,6 +223,15 @@ function clearLocalAuthToken() {
   }
 
   window.localStorage.removeItem(LOCAL_AUTH_TOKEN_KEY)
+}
+
+function buildOfflineGuestSession() {
+  const suffix = Math.random().toString(16).slice(2, 6).padEnd(4, '0')
+  return {
+    email: '',
+    userLabel: `Visitante ${suffix}`,
+    isGuest: true,
+  }
 }
 
 async function requestLocalAuth<T = unknown>(
