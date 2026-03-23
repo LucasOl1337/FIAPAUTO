@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
+import type { LlmDebugEvent } from '../../apis/contracts/index.ts'
 import { runtimePaths } from '../../config/runtimePaths.ts'
 import {
   appendLlmDebugEvent,
@@ -34,6 +35,7 @@ type ChatParams = {
   documents: LlmDocument[]
   images: LlmImage[]
   requestOptions?: LlmRequestOptions
+  debugContext?: LlmRequestDebugContext
 }
 
 type KeyEntry = {
@@ -51,6 +53,8 @@ export type LlmRequestOptions = {
   timeoutMs?: number
   keyName?: string
 }
+
+type LlmRequestDebugContext = Pick<LlmDebugEvent, 'requestId' | 'clientIp' | 'provider' | 'model'>
 
 const localKeysPath = runtimePaths.llmKeysLocalFile
 
@@ -73,7 +77,7 @@ export function llmBaseUrl() {
 }
 
 export function defaultLlmModel() {
-  return process.env.LLM_MODEL ?? process.env.LLM_MODEL_NAME ?? 'qwen3.5:cloud'
+  return process.env.LLM_MODEL ?? process.env.LLM_MODEL_NAME ?? 'qwen3.5:397b-cloud'
 }
 
 export function llmTimeoutMs() {
@@ -245,6 +249,11 @@ export async function postLlmChat(params: ChatParams) {
       endpoint: '/api/chat',
       jobId: params.jobId,
       topicId: params.topicId,
+      requestId: params.debugContext?.requestId,
+      clientIp: params.debugContext?.clientIp,
+      provider: params.debugContext?.provider,
+      model: params.debugContext?.model ?? (payload.model as string | undefined),
+      messageKind: 'error',
       statusCode: response.status,
       durationMs: Date.now() - startedAt,
       request: sanitizeChatRequest(payload),
@@ -265,6 +274,11 @@ export async function postLlmChat(params: ChatParams) {
     endpoint: '/api/chat',
     jobId: params.jobId,
     topicId: params.topicId,
+    requestId: params.debugContext?.requestId,
+    clientIp: params.debugContext?.clientIp,
+    provider: params.debugContext?.provider,
+    model: params.debugContext?.model ?? (payload.model as string | undefined),
+    messageKind: 'llm_response',
     statusCode: response.status,
     durationMs: Date.now() - startedAt,
     request: sanitizeChatRequest(payload),

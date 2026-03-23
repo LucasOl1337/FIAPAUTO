@@ -1,12 +1,15 @@
+import crypto from 'node:crypto'
 import http from 'node:http'
 import {
   askPublishedTopic,
   getPublishedManifest,
+  getPublishedMonitorStatus,
   getPublishedSyncStatus,
   getPublishedTopic,
   listPublishedTopics,
   readPublishedAsset,
 } from '../public/service.ts'
+import { appendPublicChatTraceEvent, buildPublicTraceEvent } from '../public/monitorStore.ts'
 import {
   listPublicUsersForAdmin,
   readPublicSession,
@@ -16,7 +19,9 @@ import {
   signUpPublicUser,
   touchPublicSession,
 } from '../public/authService.ts'
-import { corsHeaders, readJsonBody, requireAdminAccess, sendJson } from './http.ts'
+import { corsHeaders, readClientIp, readJsonBody, requireAdminAccess, sendJson } from './http.ts'
+
+const PUBLIC_QWEN_MODEL = process.env.PUBLIC_LLM_MODEL ?? process.env.LLM_MODEL ?? process.env.LLM_MODEL_NAME ?? 'qwen3.5:397b-cloud'
 
 function readBearerToken(request: http.IncomingMessage) {
   const authorization = request.headers.authorization
@@ -139,10 +144,23 @@ export async function handlePublicRoutes(
     return true
   }
 
+  if (request.method === 'GET' && requestUrl.pathname === '/api/public/monitor/status') {
+    if (!requireAdminAccess(request, response)) {
+      return true
+    }
+
+    sendJson(response, 200, await getPublishedMonitorStatus())
+    return true
+  }
+
   if (request.method === 'POST' && requestUrl.pathname === '/api/public/chat/topic') {
     const body = await readJsonBody(request)
     const topicId = typeof body.topicId === 'string' ? body.topicId.trim() : ''
     const question = typeof body.question === 'string' ? body.question.trim() : ''
+    const requestId = crypto.randomUUID()
+    const clientIp = readClientIp(request)
+    const userAgent = readUserAgent(request)
+    const startedAt = Date.now()
 
     if (!topicId) {
       sendJson(response, 400, { error: 'topic_id_required' })
@@ -154,7 +172,41 @@ export async function handlePublicRoutes(
       return true
     }
 
-    sendJson(response, 200, await askPublishedTopic({ topicId, question }))
+    console.log(
+      `[public-chat] start req=${requestId} ip=${clientIp || '-'} topic=${topicId} model=${PUBLIC_QWEN_MODEL} question="${compactLogText(question)}"`,
+    )
+    await appendPublicChatTraceEvent(
+      buildPublicTraceEvent({
+        requestId,
+        phase: 'started',
+        clientIp,
+        userAgent,
+        topicId,
+        question,
+        model: PUBLIC_QWEN_MODEL,
+      }),
+    )
+    try {
+      const result = await askPublishedTopic({
+        topicId,
+        question,
+        traceContext: {
+          requestId,
+          clientIp,
+          userAgent,
+        },
+      })
+      console.log(
+        `[public-chat] done req=${requestId} ip=${clientIp || '-'} topic=${topicId} provider=${result.providerUsed} model=${PUBLIC_QWEN_MODEL} strategy=${result.strategyUsed} quality=${result.qualityStatus} pass=${result.answeredByPass} duration_ms=${Date.now() - startedAt}`,
+      )
+      sendJson(response, 200, result)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'public_chat_failed'
+      console.error(
+        `[public-chat] error req=${requestId} ip=${clientIp || '-'} topic=${topicId} model=${PUBLIC_QWEN_MODEL} duration_ms=${Date.now() - startedAt} error=${message}`,
+      )
+      sendJson(response, message.startsWith('public_llm_') ? 503 : 500, { error: message })
+    }
     return true
   }
 
@@ -178,4 +230,14 @@ export async function handlePublicRoutes(
   }
 
   return false
+}
+
+function compactLogText(value: string) {
+  const cleaned = value.replace(/\s+/g, ' ').trim()
+  return cleaned.length <= 160 ? cleaned : `${cleaned.slice(0, 157)}...`
+}
+
+function readUserAgent(request: http.IncomingMessage) {
+  const userAgent = request.headers['user-agent']
+  return (Array.isArray(userAgent) ? userAgent[0] : userAgent)?.trim() || ''
 }

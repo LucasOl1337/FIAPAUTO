@@ -52,7 +52,7 @@ export function useWorkspaceController(appMode: 'admin' | 'user') {
   )
   const [botBusy, setBotBusy] = useState<'connect' | 'load' | 'test' | 'reset' | null>(null)
   const [topicBusy, setTopicBusy] = useState<'summary' | 'memory' | 'ask' | 'detail' | null>(null)
-  const [activeTab, setActiveTab] = useState<'aulas' | 'trabalhos' | 'aprendizado'>(
+  const [activeTab, setActiveTab] = useState<'aulas' | 'trabalhos' | 'aprendizado' | 'comunidade'>(
     appMode === 'admin' ? 'aulas' : 'trabalhos',
   )
   const refreshBotStatusEvent = useEffectEvent((showMessage = false) => {
@@ -334,12 +334,17 @@ export function useWorkspaceController(appMode: 'admin' | 'user') {
   }
 
   async function handleAskTopic() {
+    if (topicBusy) {
+      return
+    }
     const question = topicQuestion.trim()
     if (!question || !selectedTopicListItem) {
       setActivity('Digite uma pergunta e selecione uma materia antes de consultar o agente.')
       return
     }
     setTopicBusy('ask')
+    setTopicAnswer(null)
+    setActivity('Enviando pergunta ao agente da materia...')
     try {
       const result = appMode === 'admin'
         ? await askTopicAssistant({ topicId: selectedTopicListItem.id, question })
@@ -352,10 +357,14 @@ export function useWorkspaceController(appMode: 'admin' | 'user') {
           preserveTopicAnswer: true,
         })
       }
-      if (result.providerUsed === 'ollama') {
-        setActivity(result.sections?.answerMode === 'general_guidance' ? 'Explicacao complementar pronta com IA.' : 'Resposta gerada com IA usando o contexto da materia.')
-      } else if (result.qualityStatus === 'accepted' || result.qualityStatus === 'regenerated' || result.qualityStatus === 'fallback') {
-        setActivity(result.sections?.answerMode === 'general_guidance' ? 'Explicacao complementar pronta.' : 'Resposta baseada na materia pronta.')
+      if (result.providerUsed === 'ollama' || result.providerUsed === 'qwen' || result.answeredByPass === 'cache') {
+        setActivity(
+          result.answeredByPass === 'cache'
+            ? 'Resposta reaproveitada de um caso identico ja validado por IA.'
+            : result.sections?.answerMode === 'general_guidance'
+              ? 'Explicacao complementar pronta com IA.'
+              : 'Resposta gerada com IA usando o contexto da materia.',
+        )
       } else if (result.strategyUsed === 'memory') {
         setActivity('Resposta entregue pela memoria persistida do topico.')
       } else if (result.strategyUsed === 'deterministic') {
@@ -365,8 +374,10 @@ export function useWorkspaceController(appMode: 'admin' | 'user') {
       } else {
         setActivity('Resposta contextual gerada pelo assistente com base no topico.')
       }
-    } catch {
-      setActivity('Falha ao perguntar ao agente da materia.')
+    } catch (error) {
+      setTopicAnswer(null)
+      const message = error instanceof Error && error.message ? error.message : 'public_chat_failed'
+      setActivity(`Falha ao perguntar ao agente da materia: ${message}.`)
     } finally {
       setTopicBusy(null)
     }
@@ -754,7 +765,7 @@ function normalizePublicChatResult(
     sections: payload.sections,
     moduleKey,
     warnings: [],
-    usedFallback: payload.providerUsed === 'local',
+    usedFallback: payload.qualityStatus === 'fallback',
     answeredAt: payload.answeredAt,
     confidence: payload.confidence,
     strategyUsed:
@@ -764,7 +775,7 @@ function normalizePublicChatResult(
           ? 'rag_llm'
           : 'deterministic',
     providerUsed: payload.providerUsed,
-    fallbackLevel: payload.fallbackLevel ?? (payload.providerUsed === 'local' ? 1 : 0),
+    fallbackLevel: payload.fallbackLevel ?? (payload.qualityStatus === 'fallback' ? 1 : 0),
     citations: payload.citations,
     suggestedQuestions: payload.suggestedQuestions,
     nextSteps: payload.nextSteps,

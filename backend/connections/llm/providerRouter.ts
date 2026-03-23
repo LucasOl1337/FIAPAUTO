@@ -34,9 +34,19 @@ type ProviderConfig = {
 }
 
 const quotaErrorPattern = /(429|quota|rate limit|resource exhausted|too many requests)/i
+const DEFAULT_PUBLIC_MODEL =
+  process.env.PUBLIC_LLM_MODEL
+  ?? process.env.LLM_MODEL
+  ?? process.env.LLM_MODEL_NAME
+  ?? 'qwen3.5:397b-cloud'
 
-export async function routeAssistantChat(request: ProviderChatRequest) {
-  const providers = await buildProviderConfigs()
+export async function routeAssistantChat(
+  request: ProviderChatRequest,
+  options?: {
+    allowedProviders?: ProviderName[]
+  },
+) {
+  const providers = await buildProviderConfigs(options)
   const attempts: string[] = []
 
   for (let index = 0; index < providers.length; index += 1) {
@@ -95,7 +105,9 @@ export async function routeAssistantChat(request: ProviderChatRequest) {
   throw new Error(attempts.join('|') || 'no_provider_available')
 }
 
-async function buildProviderConfigs() {
+async function buildProviderConfigs(options?: {
+  allowedProviders?: ProviderName[]
+}) {
   const geminiLocalKeys = await readGeminiLocalKeys()
   const ollamaLocalKeys = await readOllamaLocalKeys()
   const geminiBaseUrl = process.env.GEMINI_BASE_URL ?? process.env.LLM_BASE_URL
@@ -112,7 +124,7 @@ async function buildProviderConfigs() {
       enabled: Boolean(ollamaBaseUrl || process.env.OLLAMA_API_KEY || ollamaLocalKeys.length > 0),
       transport: 'native-ollama',
       baseUrl: ollamaBaseUrl,
-      model: process.env.OLLAMA_MODEL ?? 'gpt-oss:20b',
+      model: process.env.OLLAMA_MODEL ?? DEFAULT_PUBLIC_MODEL,
       apiKey: process.env.OLLAMA_API_KEY,
       apiKeyHeader: process.env.OLLAMA_API_KEY_HEADER ?? 'Authorization',
       apiKeyScheme: process.env.OLLAMA_API_KEY_SCHEME ?? 'Bearer',
@@ -134,15 +146,24 @@ async function buildProviderConfigs() {
   ]
 
   if (providerPreference === 'gemini-first') {
-    return [providers[1], providers[0]]
+    return filterAllowedProviders([providers[1], providers[0]], options?.allowedProviders)
   }
 
-  return providers
+  return filterAllowedProviders(providers, options?.allowedProviders)
 }
 
 function parseTimeout(value: string | undefined) {
   const parsed = Number(value)
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
+}
+
+function filterAllowedProviders(providers: ProviderConfig[], allowedProviders?: ProviderName[]) {
+  if (!allowedProviders?.length) {
+    return providers
+  }
+
+  const allowed = new Set(allowedProviders)
+  return providers.filter((provider) => allowed.has(provider.name))
 }
 
 function resolveProviderKey(provider: ProviderConfig, providerHealth: Awaited<ReturnType<typeof readProviderHealth>>) {
@@ -218,7 +239,7 @@ async function invokeProvider(
 
     const response = await postOllamaChat({
       apiKey: keyMeta.value,
-      model: provider.model ?? 'gpt-oss:20b',
+      model: provider.model ?? DEFAULT_PUBLIC_MODEL,
       prompt: buildGeminiPrompt(request),
       images: request.images,
       timeoutMs: provider.timeoutMs,

@@ -23,6 +23,208 @@
   gap: 14px;
 }
 
+.auth-hero-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.auth-hero-copy,
+.auth-community-aside,
+.auth-side-notes {
+  display: grid;
+  gap: 12px;
+}
+
+.auth-community-aside {
+  min-height: 100%;
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background:
+    radial-gradient(circle at top right, rgba(255, 15, 95, 0.14), transparent 32%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.02));
+}
+
+.auth-side-notes {
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.auth-entry-screen {
+  min-height: 100vh;
+  height: 100vh;
+  padding: 14px 0;
+  overflow: hidden;
+  gap: 16px;
+}
+
+.auth-entry-top-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
+  gap: 16px;
+  align-items: stretch;
+  min-height: 0;
+  flex: 0 0 auto;
+}
+
+.auth-login-card {
+  min-height: 0;
+  height: 300px;
+}
+
+.entry-patch-panel {
+  height: 300px;
+}
+
+.auth-login-panel {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  padding-right: 8px;
+  padding-bottom: 6px;
+}
+
+.auth-login-panel h1 {
+  font-size: 1.32rem;
+  line-height: 1.05;
+}
+
+.auth-login-panel .hero-text {
+  font-size: 0.9rem;
+}
+
+.admin-gate.compact {
+  gap: 7px;
+  max-width: 420px;
+  align-content: start;
+}
+
+.admin-gate.compact .admin-gate-label {
+  font-size: 0.82rem;
+}
+
+.admin-gate.compact .admin-gate-input {
+  min-height: 36px;
+  padding: 8px 12px;
+}
+
+.auth-login-panel .action-row {
+  gap: 8px;
+  margin-top: 4px;
+  margin-bottom: 2px;
+}
+
+.auth-login-panel .primary-button,
+.auth-login-panel .secondary-button {
+  padding: 8px 12px;
+  font-size: 0.86rem;
+}
+
+.auth-entry-community-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.65fr);
+  gap: 16px;
+  overflow: hidden;
+}
+
+.auth-entry-left-column {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(108px, auto) minmax(0, 1fr);
+  gap: 16px;
+  overflow: hidden;
+}
+
+.entry-patch-panel .community-item-list,
+.entry-roadmap-panel .community-item-list,
+.entry-ideas-feed .community-item-list {
+  max-height: 100%;
+  min-height: 0;
+}
+
+.entry-roadmap-panel {
+  height: 100%;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: start;
+}
+
+.entry-ideas-feed {
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-content: start;
+}
+
+.entry-idea-form .idea-form-helper,
+.entry-ideas-feed .community-meta-text,
+.entry-patch-panel .community-meta-text,
+.entry-roadmap-panel .community-meta-text {
+  display: none !important;
+}
+
+.entry-idea-form .community-form-footer {
+  align-items: center;
+}
+
+.entry-idea-form {
+  overflow: visible;
+}
+
+.entry-idea-form .community-card-copy h3 {
+  font-size: 0.96rem;
+}
+
+.entry-idea-form .community-form {
+  gap: 6px;
+}
+
+.entry-idea-form .community-form-grid {
+  gap: 6px;
+}
+
+.entry-idea-form .community-input,
+.entry-idea-form .community-textarea {
+  font-size: 0.85rem;
+}
+
+.entry-idea-form .community-textarea {
+  min-height: 52px;
+}
+
+.entry-patch-panel .community-note-item p,
+.entry-roadmap-panel .community-roadmap-item p {
+  display: none;
+}
+
+.entry-patch-panel .community-item-list,
+.entry-roadmap-panel .community-item-list,
+.entry-ideas-feed .community-item-list {
+  display: grid;
+  align-content: start;
+  justify-items: stretch;
+  overflow: auto;
+}
+
+.entry-ideas-feed .community-idea-item {
+  grid-template-columns: 40px minmax(0, 1fr);
+}
+
+.entry-ideas-feed .community-idea-content h4 {
+  font-size: 0.9rem;
+}
+
+.entry-ideas-feed .community-empty {
+  margin-top: 0;
+  align-self: start;
+}
+
 .hero-topbar {
   display: flex;
   align-items: flex-start;
@@ -780,11 +982,19 @@ button:disabled {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .auth-entry-top-grid,
+  .auth-entry-community-grid,
+  .auth-hero-layout,
   .content-grid,
   .topic-main-grid,
   .topic-agent-grid,
   .user-focus-grid {
     grid-template-columns: 1fr;
+  }
+
+  .auth-login-card,
+  .entry-patch-panel {
+    height: auto;
   }
 }
 
@@ -792,6 +1002,11 @@ button:disabled {
   .simple-app {
     width: min(100vw - 20px, 100%);
     padding: 10px 0 20px;
+  }
+
+  .auth-entry-screen {
+    height: auto;
+    overflow: visible;
   }
 
   .hero-topbar,

@@ -5,7 +5,7 @@
   "moduleKey": "ia-aplicada",
   "status": "upcoming",
   "dueText": "Prazo de entrega às 23:59",
-  "summary": "Objetivo: AICSS - CP1.\nEntregaveis: Arquivo \"AICSS (CP 1) e Cognitive DataScience (CP 1).pdf\"; Arquivo: AICSS (CP 1) e Cognitive DataScience (CP 1).pdf\nPrazo: Data nao identificada no material.\nPontos de atencao: consulte os anexos e a screenshot da atividade para confirmar os detalhes.\nCurso: 1TIAPF-2026. Status: upcoming.",
+  "summary": "Objetivo: AICSS - CP1.\nEntregaveis: Arquivo \"AICSS (CP 1) e Cognitive DataScience (CP 1).pdf\"; Arquivo: AICSS (CP 1) e Cognitive DataScience (CP 1).pdf\nPontos de atencao: consulte os anexos e a screenshot da atividade para confirmar os detalhes.\nCurso: 1TIAPF-2026. Status: upcoming.",
   "summaryGeneratedAt": "2026-03-21T14:58:38.312Z",
   "agentMemory": {
     "overview": "Objetivo: AICSS - CP1.\nEntregaveis: Arquivo \"AICSS (CP 1) e Cognitive DataScience (CP 1).pdf\"; Arquivo: AICSS (CP 1) e Cognitive DataScience (CP 1).pdf\nAICSS (CP1) + Cognitive Data Science (CP1)\nTecnólogo em IA\nDados da entrega\nData: 13/03/2026\nEntrega no Teams da respectiva disciplina\nTema\nO problema do cotonifício Nonamed – registro de operação\nO cotonifício Nonamed possui 2 máquinas de processamento de algodã\nPrazo: Prazo de entrega às 23:59\nCurso: 1TIAPF-2026. Status: upcoming.\nPontos de atencao: consulte os anexos e a screenshot da atividade para confirmar os detalhes.",
@@ -43,46 +43,22 @@
     ]
   },
   "learning": {
-    "frequentQuestions": [
+    "frequentQuestions": [],
+    "learningTopics": [
       {
-        "question": "O que preciso entregar?",
-        "answer": "Voce precisa entregar: AICSS (CP 1) e Cognitive DataScience (CP 1).pdf."
+        "title": "Entenda o objetivo central",
+        "explanation": "Leia o enunciado de AICSS - CP1 pensando no resultado final que a atividade quer avaliar.",
+        "commonDifficulty": "Muita gente mistura objetivo da atividade com a lista de arquivos que precisa enviar.",
+        "studyStrategy": "Resuma em uma frase o objetivo do trabalho e depois confira onde cada parte aparece no enunciado."
       },
       {
-        "question": "Qual e o prazo dessa atividade?",
-        "answer": "A data exata nao apareceu no material salvo. Abra o anexo principal e confira a data na atividade original."
-      },
-      {
-        "question": "Como comeco esse trabalho?",
-        "answer": "Primeiro, entenda o objetivo central de AICSS - CP1 pelo resumo do trabalho. Depois, monte uma checklist com AICSS (CP 1) e Cognitive DataScience (CP 1).pdf. Por fim, confirme manualmente a data no PDF principal antes de enviar."
-      },
-      {
-        "question": "O que pode me fazer perder pontos?",
-        "answer": "Os criterios de perda de pontos nao ficaram totalmente objetivos no material salvo, entao vale conferir o anexo principal."
+        "title": "Evite retrabalho e perda de pontos",
+        "explanation": "Os detalhes finos de submissao e avaliacao precisam ser conferidos no enunciado principal antes do envio.",
+        "commonDifficulty": "A parte que mais confunde costuma ser esquecer regra de submissao, formato ou requisito individual do grupo.",
+        "studyStrategy": "Reserve a revisao final para conferir nomes, formato e regras da entrega."
       }
     ],
-    "simpleConcepts": [
-      {
-        "title": "Como entender a atividade",
-        "content": "Objetivo: AICSS - CP1.\nEntregaveis: Arquivo \"AICSS (CP 1) e Cognitive DataScience (CP 1).pdf\"; Arquivo: AICSS (CP 1) e Cognitive DataScience (CP 1).pdf\nPrazo: Data nao identificada no material.\nPontos de atencao: consulte os anexos e a screenshot da atividade para confirmar os detalhes.\nCurso: 1TIAPF-2026. Status: upcoming."
-      },
-      {
-        "title": "O que entregar na pratica",
-        "content": "Pense nessa atividade como uma entrega composta por: AICSS (CP 1) e Cognitive DataScience (CP 1).pdf."
-      },
-      {
-        "title": "Como resolver sem se perder",
-        "content": "Primeiro, entenda o objetivo central de AICSS - CP1 pelo resumo do trabalho. Depois, monte uma checklist com AICSS (CP 1) e Cognitive DataScience (CP 1).pdf. Por fim, confirme manualmente a data no PDF principal antes de enviar."
-      },
-      {
-        "title": "Cuidados importantes",
-        "content": "Revise o enunciado, confirme formato, prazo e regras da submissao antes de enviar."
-      }
-    ],
-    "quickTips": [
-      "Separe cedo os arquivos pedidos: AICSS (CP 1) e Cognitive DataScience (CP 1).pdf.",
-      "Confirme a data no PDF principal para nao depender so do resumo."
-    ]
+    "quickTips": []
   },
   "attachments": [
     {
@@ -97,5 +73,5 @@
     "assets/screenshots/aicss-cp1/aicss-cp1-list-3513e95d41.png",
     "assets/screenshots/aicss-cp1/aicss-cp1-detail-816ed85c97.png"
   ],
-  "updatedAt": "2026-03-21T16:42:53.879Z"
+  "updatedAt": "2026-03-22T17:12:00.058Z"
 }

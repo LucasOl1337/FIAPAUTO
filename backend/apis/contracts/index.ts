@@ -56,6 +56,11 @@ export type LlmDebugEvent = {
   endpoint: '/api/upload' | '/api/chat'
   jobId: string
   topicId?: string
+  requestId?: string
+  clientIp?: string
+  provider?: 'qwen' | 'gemini' | 'ollama' | 'local'
+  model?: string
+  messageKind?: 'user_prompt' | 'llm_prompt' | 'llm_response' | 'error'
   statusCode: number
   durationMs: number
   request: unknown
@@ -157,7 +162,7 @@ export type TopicAskResult = {
   answeredAt: string
   confidence: 'high' | 'medium' | 'low'
   strategyUsed: 'memory' | 'rag_llm' | 'provider_fallback' | 'deterministic'
-  providerUsed?: 'gemini' | 'ollama' | 'local'
+  providerUsed?: 'qwen' | 'gemini' | 'ollama' | 'local'
   fallbackLevel: number
   citations: Array<{
     sourceType: 'summary' | 'faq' | 'deadline' | 'deliverable' | 'content'
@@ -168,7 +173,7 @@ export type TopicAskResult = {
   nextSteps: string[]
   qualityStatus?: 'accepted' | 'regenerated' | 'fallback'
   qualityReason?: string
-  answeredByPass?: 'primary' | 'retry' | 'local'
+  answeredByPass?: 'primary' | 'retry' | 'local' | 'cache'
   missingSections?: string[]
 }
 
@@ -322,7 +327,7 @@ export type PublicChatResponse = {
   }
   confidence: 'high' | 'medium' | 'low'
   strategyUsed: 'memory' | 'rag_llm' | 'provider_fallback' | 'deterministic'
-  providerUsed: 'ollama' | 'gemini' | 'local'
+  providerUsed: 'qwen' | 'ollama' | 'gemini' | 'local'
   fallbackLevel?: number
   citations: Array<{
     sourceType: 'summary' | 'faq' | 'deadline' | 'deliverable' | 'content'
@@ -334,8 +339,87 @@ export type PublicChatResponse = {
   answeredAt: string
   qualityStatus: 'accepted' | 'regenerated' | 'fallback'
   qualityReason: string
-  answeredByPass: 'primary' | 'retry' | 'local'
+  answeredByPass: 'primary' | 'retry' | 'local' | 'cache'
   missingSections?: string[]
+}
+
+export type PublicChatTraceSummary = {
+  requestId: string
+  ts: string
+  phase?: 'started' | 'completed' | 'failed'
+  topicId: string
+  clientIp?: string
+  userAgent?: string
+  questionPreview: string
+  llmPromptPreview?: string
+  llmOutputPreview?: string
+  providerUsed?: PublicChatResponse['providerUsed']
+  strategyUsed?: PublicChatResponse['strategyUsed']
+  qualityStatus?: PublicChatResponse['qualityStatus']
+  answeredByPass?: PublicChatResponse['answeredByPass']
+  model?: string
+  durationMs?: number
+  error?: string
+}
+
+export type PublicChatTraceEvent = {
+  requestId: string
+  ts: string
+  phase?: 'started' | 'completed' | 'failed'
+  topicId: string
+  clientIp?: string
+  userAgent?: string
+  question: string
+  llmPrompt?: string
+  llmOutput?: string
+  finalAnswer?: string
+  providerUsed?: PublicChatResponse['providerUsed']
+  strategyUsed?: PublicChatResponse['strategyUsed']
+  qualityStatus?: PublicChatResponse['qualityStatus']
+  answeredByPass?: PublicChatResponse['answeredByPass']
+  model?: string
+  durationMs?: number
+  error?: string
+}
+
+export type PublicTrafficIpWindow = {
+  clientIp: string
+  requestCount: number
+  lastSeenAt: string
+}
+
+export type PublicModelWarning = {
+  expectedModel: string
+  actualModel?: string
+  providerUsed?: PublicChatResponse['providerUsed']
+  requestId: string
+  ts: string
+  source: string
+}
+
+export type PublicTrafficSnapshot = {
+  expectedModel: string
+  updatedAt: string
+  windowSeconds: number
+  totalRecentRequests: number
+  totalActiveIps: number
+  activeIps: PublicTrafficIpWindow[]
+  latestStarted?: PublicChatTraceSummary
+  latestCompleted?: PublicChatTraceSummary
+  latestFailure?: PublicChatTraceSummary
+  latestFallback?: PublicChatTraceSummary
+  latestModelWarning?: PublicModelWarning
+  recentChats: PublicChatTraceSummary[]
+}
+
+export type PublicMonitorStatus = {
+  expectedModel: string
+  latestProviderUsed?: PublicChatResponse['providerUsed']
+  latestModel?: string
+  latestRequestId?: string
+  latestRequestAt?: string
+  modelWarning?: PublicModelWarning
+  traffic: PublicTrafficSnapshot
 }
 
 export type PublicSyncStatus = {

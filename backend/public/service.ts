@@ -10,7 +10,8 @@ import type {
 } from '../apis/contracts/index.ts'
 import { frontendPaths, runtimePaths } from '../config/runtimePaths.ts'
 import { getLocalPublishStatus, readCurrentLocalChunks, readCurrentLocalManifest, readCurrentLocalTopic, readCurrentLocalTopicList } from '../publish/service.ts'
-import { answerPublishedTopicQuestion } from './assistant.ts'
+import { answerPublishedTopicQuestion, type PublicTraceContext } from './assistant.ts'
+import { getPublicMonitorStatus } from './monitorStore.ts'
 
 const frontendPublishedDir = path.join(frontendPaths.frontendRootDir, 'public', 'published')
 
@@ -43,7 +44,7 @@ export async function getPublishedTopic(topicId: string) {
   return topic
 }
 
-export async function askPublishedTopic(input: { topicId: string; question: string }) {
+export async function askPublishedTopic(input: { topicId: string; question: string; traceContext?: PublicTraceContext }) {
   const topic = await getPublishedTopic(input.topicId)
   const runtimeChunks = await readCurrentLocalChunks()
   const chunks =
@@ -54,6 +55,7 @@ export async function askPublishedTopic(input: { topicId: string; question: stri
     topic,
     chunks,
     question: input.question,
+    traceContext: input.traceContext,
   })
 }
 
@@ -85,6 +87,10 @@ export async function readPublishedAsset(key: string) {
 
 export async function getPublishedSyncStatus() {
   return getLocalPublishStatus(null)
+}
+
+export async function getPublishedMonitorStatus() {
+  return getPublicMonitorStatus()
 }
 
 export type {

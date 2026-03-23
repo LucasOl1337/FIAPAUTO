@@ -1,9 +1,14 @@
+import { createHash, randomUUID } from 'node:crypto'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { runtimePaths } from '../config/runtimePaths.ts'
-import { routeAssistantChat, type ProviderChatResponse } from '../connections/llm/providerRouter.ts'
+import type { LlmDocument, LlmImage } from '../connections/llm/llmClient.ts'
+import { appendLlmDebugEvent } from '../connections/llm/llmDebugStore.ts'
+import { routeAssistantChat } from '../connections/llm/providerRouter.ts'
 import { classifyQuestionIntent, type QuestionIntent } from '../engine/questionIntentClassifier.ts'
 import type { PublicChatResponse, PublicTopic, PublishedKnowledgeChunk } from '../apis/contracts/index.ts'
+import { readJsonFile, writeJsonFile } from '../database/fs.ts'
+import { appendPublicChatTraceEvent, buildPublicTraceEvent } from './monitorStore.ts'
 
 type Citation = PublicChatResponse['citations'][number]
 
@@ -21,13 +26,6 @@ type QualityEvaluation = {
   missingSections: string[]
 }
 
-type DeterministicPackage = {
-  answer: string
-  deliverables: string[]
-  attention: string[]
-  nextSteps: string[]
-}
-
 type ToolUsageContext = {
   toolLabel: string
   toolKey: string
@@ -35,10 +33,44 @@ type ToolUsageContext = {
   hasExplicitRequirement: boolean
 }
 
+type PublicExactAnswerCacheEntry = {
+  id: string
+  topicId: string
+  question: string
+  questionNormalized: string
+  answer: string
+  sections: PublicChatResponse['sections']
+  confidence: PublicChatResponse['confidence']
+  strategyUsed: 'rag_llm'
+  providerUsed: 'qwen' | 'ollama'
+  fallbackLevel: number
+  citations: PublicChatResponse['citations']
+  suggestedQuestions: string[]
+  nextSteps: string[]
+  answeredAt: string
+  qualityStatus: 'accepted' | 'regenerated'
+  qualityReason: string
+  answeredByPass: 'primary' | 'retry'
+  missingSections?: string[]
+  model: string
+  contentSignature: string
+  createdAt: string
+}
+
+const PUBLIC_QWEN_MODEL = process.env.PUBLIC_LLM_MODEL ?? process.env.LLM_MODEL ?? process.env.LLM_MODEL_NAME ?? 'qwen3.5:397b-cloud'
+const PUBLIC_EXACT_CACHE_FILE = path.join(runtimePaths.knowledgeCatalogDir, 'public-exact-answers.json')
+
+export type PublicTraceContext = {
+  requestId: string
+  clientIp?: string
+  userAgent?: string
+}
+
 export async function answerPublishedTopicQuestion(input: {
   topic: PublicTopic
   chunks: PublishedKnowledgeChunk[]
   question: string
+  traceContext?: PublicTraceContext
 }) {
   const intent = classifyQuestionIntent(input.question)
   const scopedChunks = input.chunks.filter((chunk) => chunk.topicId === input.topic.id)
@@ -48,12 +80,6 @@ export async function answerPublishedTopicQuestion(input: {
     sourceLabel: `${input.topic.title} / ${chunk.sourceType}`,
     snippet: chunk.text,
   })) satisfies Citation[]
-  const deterministic = buildDeterministicPackage({
-    topic: input.topic,
-    question: input.question,
-    citations,
-    intent,
-  })
   const confidence = citations.length >= 2 ? 'high' : citations.length === 1 ? 'medium' : 'low'
   const prompt = buildPrompt({
     topic: input.topic,
@@ -61,17 +87,74 @@ export async function answerPublishedTopicQuestion(input: {
     rankedChunks: rankedChunks.slice(0, 6),
     intent,
   })
-  const documents = buildDocuments(input.topic, citations)
+  const documents = buildDocuments(input.topic, citations, intent)
   const images = shouldAttachTopicImages(input.question) ? await readTopicImages(input.topic) : []
+  const traceContext = input.traceContext
+  const startedAt = Date.now()
+  let lastLlmPrompt = prompt
+  let lastLlmOutput = ''
 
   try {
-    const primary = await routeAssistantChat({
+    await appendTraceDebugEvent({
+      traceContext,
+      topicId: input.topic.id,
+      messageKind: 'user_prompt',
+      request: input.question,
+      response: '',
+    })
+
+    const exactCache = await findExactPublicAnswerCacheMatch({
+      topic: input.topic,
+      chunks: scopedChunks,
+      question: input.question,
+    })
+    if (exactCache) {
+      const cachedPayload = toPublicChatResponseFromCache(exactCache)
+      await appendAssistantTraceEvent({
+        traceContext,
+        topicId: input.topic.id,
+        question: input.question,
+        durationMs: Date.now() - startedAt,
+        payload: cachedPayload,
+        model: exactCache.model,
+      })
+      return cachedPayload
+    }
+
+    await appendTraceDebugEvent({
+      traceContext,
+      topicId: input.topic.id,
+      messageKind: 'llm_prompt',
+      request: prompt,
+      response: '',
+    })
+    if (traceContext?.requestId) {
+      await appendPublicChatTraceEvent(
+        buildPublicTraceEvent({
+          requestId: traceContext.requestId,
+          phase: 'started',
+          clientIp: traceContext.clientIp,
+          userAgent: traceContext.userAgent,
+          topicId: input.topic.id,
+          question: input.question,
+          llmPrompt: prompt,
+          model: PUBLIC_QWEN_MODEL,
+        }),
+      )
+    }
+    const primary = await requestPublicQwenChat({
       jobId: `public-topic-ask-${input.topic.id}-${Date.now()}`,
       topicId: input.topic.id,
       prompt,
       documents,
       images,
+      traceContext,
     })
+    lastLlmOutput = primary.answer
+
+    if (!primary.answer.trim()) {
+      throw new Error('public_llm_empty_primary_response')
+    }
 
     const primaryPayload = buildProviderPayload({
       input,
@@ -84,70 +167,52 @@ export async function answerPublishedTopicQuestion(input: {
       answeredByPass: 'primary',
     })
 
-    if (primaryPayload.qualityStatus !== 'accepted') {
-      const retryPrompt = buildRetryPrompt({
+    if (primaryPayload.qualityAccepted) {
+      await saveExactPublicAnswerCacheEntry({
         topic: input.topic,
+        chunks: scopedChunks,
         question: input.question,
-        intent,
-        previousAnswer: primary.answer,
-        qualityReason: primaryPayload.qualityReason,
-        missingSections: primaryPayload.missingSections ?? [],
-        rankedChunks: rankedChunks.slice(0, 6),
+        payload: primaryPayload,
       })
-
-      try {
-        const retry = await routeAssistantChat({
-          jobId: `public-topic-ask-retry-${input.topic.id}-${Date.now()}`,
-          topicId: input.topic.id,
-          prompt: retryPrompt,
-          documents,
-          images,
-        })
-
-        const retryPayload = buildProviderPayload({
-          input,
-          citations,
-          confidence,
-          intent,
-          providerResponse: retry,
-          answer: retry.answer,
-          qualityStatus: 'regenerated',
-          answeredByPass: 'retry',
-        })
-
-        if (retryPayload.qualityStatus !== 'fallback') {
-          return retryPayload
-        }
-
-        return buildFallbackPayload({
-          input,
-          citations,
-          confidence,
-          deterministic,
-          reason: retryPayload.qualityReason,
-          missingSections: retryPayload.missingSections,
-        })
-      } catch {
-        return buildFallbackPayload({
-          input,
-          citations,
-          confidence,
-          deterministic,
-          reason: primaryPayload.qualityReason,
-          missingSections: primaryPayload.missingSections,
-        })
-      }
     }
-
-    return primaryPayload
-  } catch {
-    return buildFallbackPayload({
-      input,
-      citations,
-      confidence,
-      deterministic,
-      reason: 'A resposta da IA falhou ou ficou insuficiente; usamos o fallback local.',
+    await appendAssistantTraceEvent({
+      traceContext,
+      topicId: input.topic.id,
+      question: input.question,
+      llmPrompt: lastLlmPrompt,
+      llmOutput: lastLlmOutput,
+      durationMs: Date.now() - startedAt,
+      payload: primaryPayload,
     })
+    return primaryPayload
+  } catch (error) {
+    await appendTraceDebugEvent({
+      traceContext,
+      topicId: input.topic.id,
+      messageKind: 'error',
+      request: lastLlmPrompt,
+      response: lastLlmOutput,
+      error: error instanceof Error ? error.message : 'public_qwen_failed',
+    })
+    await appendPublicChatTraceEvent(
+      buildPublicTraceEvent({
+        requestId: traceContext?.requestId ?? randomUUID(),
+        clientIp: traceContext?.clientIp,
+        userAgent: traceContext?.userAgent,
+        topicId: input.topic.id,
+        question: input.question,
+        llmPrompt: lastLlmPrompt,
+        llmOutput: lastLlmOutput,
+        providerUsed: 'qwen',
+        strategyUsed: 'rag_llm',
+        qualityStatus: 'fallback',
+        answeredByPass: 'retry',
+        model: PUBLIC_QWEN_MODEL,
+        durationMs: Date.now() - startedAt,
+        error: error instanceof Error ? error.message : 'public_qwen_failed',
+      }),
+    )
+    throw new Error(error instanceof Error ? error.message : 'public_qwen_failed')
   }
 }
 
@@ -156,11 +221,16 @@ function buildProviderPayload(input: {
   citations: Citation[]
   confidence: PublicChatResponse['confidence']
   intent: QuestionIntent
-  providerResponse: ProviderChatResponse
+  providerResponse: {
+    answer: string
+    providerUsed: NonNullable<PublicChatResponse['providerUsed']>
+    strategyUsed: PublicChatResponse['strategyUsed']
+    fallbackLevel: number
+  }
   answer: string
   qualityStatus: 'accepted' | 'regenerated'
   answeredByPass: 'primary' | 'retry'
-}) {
+}): PublicChatResponse & { qualityAccepted: boolean } {
   const parsed = parseStructuredAnswer(input.answer)
   const evaluation = evaluateAnswerQuality({
     question: input.input.question,
@@ -196,11 +266,12 @@ function buildProviderPayload(input: {
       suggestedQuestions: buildSuggestedQuestions(input.intent),
       nextSteps,
       answeredAt: new Date().toISOString(),
-      qualityStatus: 'fallback',
+      qualityStatus: input.qualityStatus,
       qualityReason: evaluation.reason,
       answeredByPass: input.answeredByPass,
       missingSections: evaluation.missingSections,
-    } satisfies PublicChatResponse
+      qualityAccepted: false,
+    } satisfies PublicChatResponse & { qualityAccepted: boolean }
   }
 
   const nextSteps = parsed.nextSteps.length > 0
@@ -240,41 +311,226 @@ function buildProviderPayload(input: {
     qualityReason: evaluation.reason,
     answeredByPass: input.answeredByPass,
     missingSections: evaluation.missingSections,
-  } satisfies PublicChatResponse
+    qualityAccepted: true,
+  } satisfies PublicChatResponse & { qualityAccepted: boolean }
 }
 
-function buildFallbackPayload(input: {
-  input: { topic: PublicTopic; question: string }
-  citations: Citation[]
-  confidence: PublicChatResponse['confidence']
-  deterministic: DeterministicPackage
-  reason: string
-  missingSections?: string[]
+async function findExactPublicAnswerCacheMatch(input: {
+  topic: PublicTopic
+  chunks: PublishedKnowledgeChunk[]
+  question: string
 }) {
+  const entries = await readJsonFile<PublicExactAnswerCacheEntry[]>(PUBLIC_EXACT_CACHE_FILE, [])
+  const questionNormalized = normalizeQuestionForCache(input.question)
+  const contentSignature = buildPublicContentSignature(input.topic, input.chunks)
+  return entries.find((entry) =>
+    entry.topicId === input.topic.id
+    && entry.questionNormalized === questionNormalized
+    && entry.contentSignature === contentSignature
+    && ['qwen', 'ollama'].includes(entry.providerUsed)
+    && ['accepted', 'regenerated'].includes(entry.qualityStatus)
+  ) ?? null
+}
+
+async function saveExactPublicAnswerCacheEntry(input: {
+  topic: PublicTopic
+  chunks: PublishedKnowledgeChunk[]
+  question: string
+  payload: PublicChatResponse & { qualityAccepted?: boolean }
+}) {
+  if (!['qwen', 'ollama'].includes(input.payload.providerUsed)) {
+    return
+  }
+
+  if (!['accepted', 'regenerated'].includes(input.payload.qualityStatus)) {
+    return
+  }
+
+  const qualityStatus = input.payload.qualityStatus === 'accepted' ? 'accepted' : 'regenerated'
+  const questionNormalized = normalizeQuestionForCache(input.question)
+  const contentSignature = buildPublicContentSignature(input.topic, input.chunks)
+  const currentEntries = await readJsonFile<PublicExactAnswerCacheEntry[]>(PUBLIC_EXACT_CACHE_FILE, [])
+  const nextEntry = {
+    id: randomUUID(),
+    topicId: input.topic.id,
+    question: input.question,
+    questionNormalized,
+    answer: input.payload.answer,
+    sections: input.payload.sections,
+    confidence: input.payload.confidence,
+    strategyUsed: 'rag_llm',
+    providerUsed: input.payload.providerUsed === 'ollama' ? 'ollama' : 'qwen',
+    fallbackLevel: input.payload.fallbackLevel ?? 0,
+    citations: input.payload.citations,
+    suggestedQuestions: input.payload.suggestedQuestions,
+    nextSteps: input.payload.nextSteps,
+    answeredAt: input.payload.answeredAt,
+    qualityStatus,
+    qualityReason: input.payload.qualityReason,
+    answeredByPass: input.payload.answeredByPass === 'retry' ? 'retry' : 'primary',
+    missingSections: input.payload.missingSections,
+    model: PUBLIC_QWEN_MODEL,
+    contentSignature,
+    createdAt: new Date().toISOString(),
+  } satisfies PublicExactAnswerCacheEntry
+  const deduped = [
+    nextEntry,
+    ...currentEntries.filter((entry) => !(
+      entry.topicId === nextEntry.topicId
+      && entry.questionNormalized === nextEntry.questionNormalized
+      && entry.contentSignature === nextEntry.contentSignature
+    )),
+  ].slice(0, 500)
+  await writeJsonFile(PUBLIC_EXACT_CACHE_FILE, deduped)
+}
+
+function toPublicChatResponseFromCache(entry: PublicExactAnswerCacheEntry): PublicChatResponse {
   return {
-    topicId: input.input.topic.id,
-    answer: input.deterministic.answer,
-    sections: buildResponseSections({
-      summary10s: extractSectionSummary(input.deterministic.answer),
-      fullAnswer: [sanitizeAnswerText(input.deterministic.answer)],
-      deliverables: input.deterministic.deliverables,
-      attentionPoints: input.deterministic.attention,
-      nextSteps: input.deterministic.nextSteps,
-      followUpQuestions: buildSuggestedQuestions(classifyQuestionIntent(input.input.question)),
-    }),
-    confidence: input.confidence,
-    strategyUsed: input.input.topic.agentMemory ? 'memory' : 'deterministic',
-    providerUsed: 'local',
-    fallbackLevel: 2,
-    citations: input.citations,
-    suggestedQuestions: buildSuggestedQuestions(classifyQuestionIntent(input.input.question)),
-    nextSteps: input.deterministic.nextSteps,
+    topicId: entry.topicId,
+    answer: entry.answer,
+    sections: entry.sections,
+    confidence: entry.confidence,
+    strategyUsed: entry.strategyUsed,
+    providerUsed: entry.providerUsed,
+    fallbackLevel: entry.fallbackLevel,
+    citations: entry.citations,
+    suggestedQuestions: entry.suggestedQuestions,
+    nextSteps: entry.nextSteps,
     answeredAt: new Date().toISOString(),
-    qualityStatus: 'fallback',
-    qualityReason: input.reason,
-    answeredByPass: 'local',
-    missingSections: input.missingSections,
-  } satisfies PublicChatResponse
+    qualityStatus: entry.qualityStatus,
+    qualityReason: `${entry.qualityReason} Resposta identica reaproveitada do cache validado do LLM.`,
+    answeredByPass: 'cache',
+    missingSections: entry.missingSections,
+  }
+}
+
+function normalizeQuestionForCache(value: string) {
+  return normalizeText(value)
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function buildPublicContentSignature(topic: PublicTopic, chunks: PublishedKnowledgeChunk[]) {
+  const hash = createHash('sha1')
+  hash.update(topic.id)
+  hash.update('|')
+  hash.update(topic.updatedAt ?? '')
+  hash.update('|')
+  for (const chunk of chunks
+    .slice()
+    .sort((left, right) => left.id.localeCompare(right.id))) {
+    hash.update(chunk.id)
+    hash.update('|')
+    hash.update(chunk.capturedAt)
+    hash.update('|')
+    hash.update(chunk.text)
+    hash.update('\n')
+  }
+  return hash.digest('hex')
+}
+
+async function requestPublicQwenChat(input: {
+  jobId: string
+  topicId: string
+  prompt: string
+  documents: LlmDocument[]
+  images: LlmImage[]
+  traceContext?: PublicTraceContext
+}) {
+  const response = await routeAssistantChat({
+    jobId: input.jobId,
+    topicId: input.topicId,
+    prompt: input.prompt,
+    documents: input.documents,
+    images: input.images,
+  }, {
+    allowedProviders: ['ollama'],
+  })
+
+  await appendTraceDebugEvent({
+    traceContext: input.traceContext,
+    topicId: input.topicId,
+    messageKind: 'llm_response',
+    request: input.prompt,
+    response: response.answer.trim(),
+    provider: response.providerUsed,
+  })
+
+  return {
+    answer: response.answer.trim(),
+    providerUsed: response.providerUsed,
+    strategyUsed: response.strategyUsed,
+    fallbackLevel: response.fallbackLevel,
+  }
+}
+
+async function appendTraceDebugEvent(input: {
+  traceContext?: PublicTraceContext
+  topicId: string
+  messageKind: 'user_prompt' | 'llm_prompt' | 'llm_response' | 'error'
+  request: unknown
+  response: unknown
+  error?: string
+  provider?: 'qwen' | 'gemini' | 'ollama' | 'local'
+}) {
+  if (!input.traceContext?.requestId) {
+    return
+  }
+
+  await appendLlmDebugEvent({
+    id: randomUUID(),
+    ts: new Date().toISOString(),
+    endpoint: '/api/chat',
+    jobId: `public-trace-${input.traceContext.requestId}`,
+    topicId: input.topicId,
+    requestId: input.traceContext.requestId,
+    clientIp: input.traceContext.clientIp,
+    provider: input.provider ?? (input.messageKind === 'error' ? 'local' : 'qwen'),
+    model: PUBLIC_QWEN_MODEL,
+    messageKind: input.messageKind,
+    statusCode: input.error ? 500 : 200,
+    durationMs: 0,
+    request: input.request,
+    response: input.response,
+    error: input.error,
+  })
+}
+
+async function appendAssistantTraceEvent(input: {
+  traceContext?: PublicTraceContext
+  topicId: string
+  question: string
+  llmPrompt?: string
+  llmOutput?: string
+  durationMs?: number
+  payload: PublicChatResponse
+  error?: string
+  model?: string
+}) {
+  if (!input.traceContext?.requestId) {
+    return
+  }
+
+  await appendPublicChatTraceEvent(
+    buildPublicTraceEvent({
+      requestId: input.traceContext.requestId,
+      clientIp: input.traceContext.clientIp,
+      userAgent: input.traceContext.userAgent,
+      topicId: input.topicId,
+      question: input.question,
+      llmPrompt: input.llmPrompt,
+      llmOutput: input.llmOutput,
+      finalAnswer: input.payload.answer,
+      providerUsed: input.payload.providerUsed,
+      strategyUsed: input.payload.strategyUsed,
+      qualityStatus: input.payload.qualityStatus,
+      answeredByPass: input.payload.answeredByPass,
+      model: input.model ?? PUBLIC_QWEN_MODEL,
+      durationMs: input.durationMs,
+      error: input.error,
+    }),
+  )
 }
 
 function buildResponseSections(input: {
@@ -306,284 +562,161 @@ function buildResponseSections(input: {
   }
 }
 
-function extractSectionSummary(answer: string) {
-  const parsed = parseStructuredAnswer(answer)
-  return parsed.direct || sanitizeAnswerText(answer)
-}
-
-function buildDeterministicPackage(input: {
-  topic: PublicTopic
-  question: string
-  citations: Citation[]
-  intent: QuestionIntent
-}): DeterministicPackage {
-  const deliverables = buildDeliverableItems(input.topic, input.citations)
-  const attention = buildAttentionItems(input.topic, input.citations).slice(0, 3)
-  const nextSteps = buildActionableSteps({
-    topic: input.topic,
-    question: input.question,
-    intent: input.intent,
-    citations: input.citations,
-  }).slice(0, 3)
-  const direct = buildDirectFallback({
-    topic: input.topic,
-    question: input.question,
-    intent: input.intent,
-    citations: input.citations,
-    deliverables,
-  })
-
-  return {
-    answer: formatStructuredAnswer({
-      direct,
-      deliverables,
-      attention,
-      nextSteps,
-    }),
-    deliverables,
-    attention,
-    nextSteps,
-  }
-}
-
-function buildDirectFallback(input: {
-  topic: PublicTopic
-  question: string
-  intent: QuestionIntent
-  citations: Citation[]
-  deliverables: string[]
-}) {
-  const normalizedQuestion = normalizeText(input.question)
-  const summaryBase = buildContextOverview(input.topic, input.citations)
-  const attentionItems = buildAttentionItems(input.topic, input.citations)
-  const cleanDeliverables = cleanDeliverableItems(input.deliverables)
-  const toolContext = getToolUsageContext({
-    topic: input.topic,
-    citations: input.citations,
-    question: input.question,
-  })
-
-  if (input.intent === 'smalltalk_or_noise') {
-    return `Sua pergunta ficou vaga. Pergunte algo direto sobre ${input.topic.title}, como entregaveis, checklist ou pontos de atencao.`
-  }
-
-  if (input.intent === 'off_topic_learning') {
-    return `Posso explicar o conceito de forma curta e depois conectar isso com ${input.topic.title}.`
-  }
-
-  if (input.intent === 'deliverable') {
-    return cleanDeliverables.length > 0
-      ? `Os entregaveis principais desta materia sao ${cleanDeliverables.join(', ')}.`
-      : `Posso te ajudar melhor se voce perguntar pelo checklist ou abrir o anexo principal de ${input.topic.title}.`
-  }
-
-  if (input.intent === 'grading' || input.intent === 'format') {
-    return attentionItems[0] || `Os pontos de atencao desta materia ficam mais claros quando voce olha o checklist e os criterios do anexo principal.`
-  }
-
-  if (input.intent === 'tool_usage') {
-    if (/\bpython\b|\br\b|\bcodigo\b|\bscript\b|\bexcel\b|\bplanilha\b/.test(normalizedQuestion)) {
-      if (toolContext.hasExplicitRequirement) {
-        return `${toolContext.toolLabel} aparece no material como parte exigida ou claramente solicitada neste trabalho. Use essa ferramenta sem perder o foco no entregavel final.`
-      }
-
-      if (toolContext.hasMentionInContext) {
-        return `${toolContext.toolLabel} aparece no contexto da disciplina, mas nao foi exigido explicitamente neste checkpoint. Se quiser usar, trate isso como apoio opcional para organizar, limpar ou analisar os dados antes de montar os entregaveis oficiais.`
-      }
-
-      return `${toolContext.toolLabel} nao foi exigido explicitamente no material de ${input.topic.title}. Se quiser usar, trate isso como apoio opcional para organizar, limpar ou analisar os dados antes de montar os entregaveis oficiais.`
-    }
-  }
-
-  if (input.intent === 'next_steps' || input.intent === 'explanation' || input.intent === 'unknown') {
-    if (/\bpython\b|\br\b|\bcodigo\b|\bscript\b/.test(normalizedQuestion)) {
-      return input.citations.some((item) => /\bpython\b|\br\b|\bcodigo\b|\bscript\b/i.test(item.snippet))
-        ? input.citations[0]?.snippet || 'Encontrei referencia pratica no material e vou te direcionar pelo que esta publicado.'
-        : `Nao encontrei no material nenhuma etapa obrigatoria de programacao para ${input.topic.title}. O foco publicado parece estar mais nos entregaveis e nas validacoes finais.`
-    }
-
-    if (summaryBase) {
-      return `Para avancar em ${input.topic.title}, comece pelo entregavel principal e siga um passo de cada vez.`
-    }
-  }
-
-  if (input.intent === 'summary' || input.intent === 'greeting') {
-    return summaryBase || `Posso resumir ${input.topic.title}, listar entregaveis ou montar um checklist curto.`
-  }
-
-  return input.citations[0]?.snippet
-    || summaryBase
-    || `Pergunte algo mais especifico sobre ${input.topic.title}, como entregaveis, formato ou checklist.`
-}
-
 function buildPrompt(input: {
   topic: PublicTopic
   question: string
   rankedChunks: PublishedKnowledgeChunk[]
   intent: QuestionIntent
 }) {
-  const normalizedLearning = normalizeLearning(input.topic.learning)
-  const learningFaq = (normalizedLearning?.frequentQuestions ?? [])
-    .slice(0, 4)
-    .map((item) => `- ${item.question}: ${item.answer}`)
-    .join('\n')
-  const learningTopics = (normalizedLearning?.learningTopics ?? [])
-    .slice(0, 3)
-    .map((item) => `- ${item.title}: ${item.explanation} Dificuldade comum: ${item.commonDifficulty} Estrategia: ${item.studyStrategy}`)
-    .join('\n')
-  const quickTips = (normalizedLearning?.quickTips ?? [])
-    .slice(0, 4)
-    .map((item) => `- ${item}`)
-    .join('\n')
-  const deliverables = buildDeliverableItems(input.topic, input.rankedChunks.slice(0, 6).map((chunk) => ({
-    sourceType: chunk.sourceType === 'overview' ? 'summary' : chunk.sourceType,
-    sourceLabel: `${input.topic.title} / ${chunk.sourceType}`,
-    snippet: chunk.text,
-  })) satisfies Citation[])
-  const attention = buildAttentionItems(input.topic, input.rankedChunks.slice(0, 6).map((chunk) => ({
-    sourceType: chunk.sourceType === 'overview' ? 'summary' : chunk.sourceType,
-    sourceLabel: `${input.topic.title} / ${chunk.sourceType}`,
-    snippet: chunk.text,
-  })) satisfies Citation[])
+  const promptChunks = selectPromptChunks(input.rankedChunks, input.intent)
+  const promptCitations = promptChunksToCitations(input.topic, promptChunks)
+  const deliverables = buildDeliverableItems(input.topic, promptCitations)
+  const attention = buildAttentionItems(input.topic, promptCitations)
   const nextSteps = buildActionableSteps({
     topic: input.topic,
     question: input.question,
     intent: input.intent,
-    citations: input.rankedChunks.slice(0, 6).map((chunk) => ({
-      sourceType: chunk.sourceType === 'overview' ? 'summary' : chunk.sourceType,
-      sourceLabel: `${input.topic.title} / ${chunk.sourceType}`,
-      snippet: chunk.text,
-    })) satisfies Citation[],
+    citations: promptCitations,
   })
-  const chunkBlock = input.rankedChunks
-    .map((chunk, index) => `[${index + 1}] ${chunk.sourceType}: ${cleanProviderSnippet(chunk.text)}`)
-    .join('\n\n')
-  const toolContext = getToolUsageContext({
-    topic: input.topic,
-    citations: input.rankedChunks.slice(0, 6).map((chunk) => ({
-      sourceType: chunk.sourceType === 'overview' ? 'summary' : chunk.sourceType,
-      sourceLabel: `${input.topic.title} / ${chunk.sourceType}`,
-      snippet: chunk.text,
-    })) satisfies Citation[],
-    question: input.question,
-  })
+  const chunkBlock = promptChunks
+    .map((chunk, index) => `Trecho ${index + 1} (${chunk.sourceType}): ${cleanProviderSnippet(chunk.text)}`)
+    .join('\n')
+  const contextDescription = buildPromptContextDescription(input.topic, promptCitations)
 
   return [
-    'Voce e o assistente publico do FiapFlow.',
-    'Responda em portugues do Brasil, de forma objetiva, natural e util para um aluno com pouco tempo.',
-    'Sua resposta precisa ser clara, curta e visualmente limpa.',
-    'Use apenas fatos confirmados do material e ignore ruido administrativo.',
-    'Ignore prazo, data, horario, status, modulo, professor, nome bruto de arquivo, links e metadados administrativos.',
-    'Nunca diga "nao encontrei isso no material", "nao sei" ou frases equivalentes.',
-    'Se a pergunta for vaga ou ruido, nao invente resposta academica: peca uma reformulacao curta e ofereca 2 exemplos uteis.',
-    'Se a pergunta sair da materia, explique em no maximo 2 frases e reconecte com a atividade atual.',
-    'Nao repita a mesma ideia em mais de um bloco.',
+    'Voce e o assistente academico do FiapFlow.',
+    'Responda sempre em portugues do Brasil.',
+    'Seu objetivo principal e maximizar o aprendizado do aluno com clareza, utilidade e honestidade.',
     '',
-    `Intencao principal da pergunta: ${input.intent}`,
-    `Materia: ${input.topic.title}`,
+    'Antes de responder, faca internamente esta analise:',
+    '1. Entenda o contexto da materia atual.',
+    '2. Identifique o que o aluno realmente quer saber, mesmo que a pergunta esteja mal formulada.',
+    '3. Compare a pergunta com a materia e classifique a relacao entre elas como: diretamente relacionada, parcialmente relacionada, vagamente relacionada ou nao relacionada.',
+    '4. Avalie se ha contexto suficiente para responder com seguranca.',
+    '5. Escolha a resposta que mais ajuda o aluno a aprender, sem inventar conteudo e sem fingir certeza.',
     '',
-    'Visao geral limpa:',
-    buildContextOverview(input.topic, input.rankedChunks.slice(0, 6).map((chunk) => ({
-      sourceType: chunk.sourceType === 'overview' ? 'summary' : chunk.sourceType,
-      sourceLabel: `${input.topic.title} / ${chunk.sourceType}`,
-      snippet: chunk.text,
-    })) satisfies Citation[]) || 'Sem visao geral limpa.',
+    'Regras de comportamento:',
+    '- Nunca invente informacoes, entregas, datas, criterios ou conteudo academico.',
+    '- Nunca finja que entendeu algo que nao esta claro.',
+    '- Se a pergunta estiver boa e alinhada com a materia, responda normalmente da melhor forma possivel.',
+    '- Se a pergunta estiver incompleta, ambigua ou vaga, diga isso de forma curta e ajude o aluno a reformular.',
+    '- Se a pergunta estiver parcialmente relacionada, aproveite a parte valida e redirecione o restante.',
+    '- Se a pergunta nao estiver relacionada a materia, deixe isso claro e sugira como adapta-la ao contexto correto.',
+    '- Se a pergunta nao estiver relacionada a materia, nao transforme automaticamente a resposta em checklist, entrega, resumo ou explicacao do trabalho.',
+    '- Use o contexto da materia apenas quando ele realmente ajudar a responder a pergunta do aluno.',
+    '- Nunca force entregaveis, atencoes ou proximos passos da materia quando o tema perguntado estiver fora do contexto.',
+    '- Sempre priorize utilidade pratica para o aluno.',
+    '- Sempre que possivel, transforme a duvida em algo mais claro, acionavel e facil de estudar.',
     '',
-    'Entregaveis limpos:',
-    deliverables.map((item) => `- ${item}`).join('\n') || '- Nenhum entregavel limpo identificado.',
+    'Estrategia de resposta:',
+    '- Se houver resposta confiavel: explique de forma simples, objetiva e util.',
+    '- Se houver risco de ma interpretacao: destaque rapidamente o ponto de atencao.',
+    '- Se faltar contexto: peca reformulacao curta e de exemplos concretos.',
+    '- Se a pergunta envolver atividade, trabalho ou entrega: explique exatamente o que parece ser pedido, mas apenas se isso estiver sustentado pelo contexto.',
+    '- Se a pergunta permitir, inclua exemplos ligados a materia atual.',
     '',
-    'Pontos de atencao limpos:',
-    attention.map((item) => `- ${item}`).join('\n') || '- Nenhum ponto de atencao limpo identificado.',
+    'Criterio de qualidade da resposta:',
+    '- Clareza > floreio',
+    '- Utilidade pratica > formalidade',
+    '- Honestidade > completar lacunas no chute',
+    '- Aprendizado real > resposta generica',
     '',
-    'Proximos passos seguros:',
-    nextSteps.map((item) => `- ${item}`).join('\n') || '- Nenhum proximo passo limpo identificado.',
+    'Formato da resposta:',
+    '- Nao use um formato rigido sempre.',
+    '- Adapte o formato ao caso para gerar a melhor resposta possivel.',
+    '- Quando necessario, voce pode usar blocos como:',
+    '  - Resposta direta',
+    '  - O que entregar',
+    '  - Atencao',
+    '  - Proximo passo',
+    '- Mas so use esses blocos se eles realmente melhorarem a resposta.',
     '',
-    'FAQ / aprendizado:',
-    learningFaq || '- Nenhum FAQ publicado.',
+    `Materia atual: ${input.topic.title}`,
+    `Descricao da materia / contexto disponivel: ${contextDescription || 'nao informado'}`,
+    `Pergunta do aluno: ${input.question}`,
     '',
-    'Topicos de aprendizado:',
-    learningTopics || '- Nenhum topico de aprendizado publicado.',
+    `Sinais de contexto detectados: entregaveis=${deliverables.join(' | ') || 'nao identificados'} ; atencao=${attention.join(' | ') || 'nao identificada'} ; proximos_passos=${nextSteps.join(' | ') || 'nao identificado'}`,
     '',
-    'Dicas rapidas:',
-    quickTips || '- Nenhuma dica rapida publicada.',
+    `Trechos relevantes do material:\n${chunkBlock || 'Nenhum trecho relevante encontrado.'}`,
     '',
-    'Trechos relevantes do material:',
-    chunkBlock || 'Nenhum trecho relevante encontrado.',
+    'Sua tarefa final:',
+    'Entregar a melhor resposta possivel para ajudar o aluno a aprender com base na relacao entre a materia e a pergunta.',
+    'Se a pergunta estiver fraca, alem de responder o que for possivel, melhore a direcao da duvida.',
+    'Se a pergunta estiver desalinhada, redirecione com inteligencia.',
+    'Se a pergunta estiver boa, responda de forma excelente.',
     '',
-    `Pergunta do usuario: ${input.question}`,
-    '',
-    'Formato obrigatorio da resposta:',
-    'RESPOSTA DIRETA:',
-    'O QUE ENTREGAR:',
-    'ATENCAO:',
-    'PROXIMO PASSO:',
-    '',
-    'Regras do formato:',
-    '- RESPOSTA DIRETA: 1 ou 2 frases curtas respondendo exatamente a pergunta.',
-    '- O QUE ENTREGAR: 0 a 3 bullets limpos, apenas itens humanos e curtos.',
-    '- ATENCAO: 0 a 3 bullets curtos, um risco por linha, sem repetir prazo.',
-    '- PROXIMO PASSO: 1 a 3 bullets acionaveis, em ordem pratica.',
-    '- Se um bloco nao tiver valor real, deixe o bloco vazio depois dos dois pontos.',
-    '- Nao use markdown, tabela, pipe, titulo com #, bloco de codigo ou texto decorativo.',
-    '- Nao copie links, nomes de arquivo crus ou cabecalhos administrativos.',
-    '- Cada bullet deve caber bem em uma interface compacta.',
-    ...(input.intent === 'tool_usage'
-      ? [
-          '- Esta e uma pergunta de ferramenta/execucao.',
-          `- Primeiro diga claramente se ${toolContext.toolLabel} e obrigatorio, opcional, ou se nao foi exigido explicitamente no material.`,
-          `- Se ${toolContext.toolLabel} aparecer apenas no contexto da disciplina, deixe claro que isso nao significa exigencia deste checkpoint.`,
-          `- Se ${toolContext.toolLabel} nao aparecer no material, nao transforme isso em exigencia.`,
-          `- Explique em 1 ou 2 frases como ${toolContext.toolLabel} pode ajudar opcionalmente dentro deste trabalho sem fugir da entrega real.`,
-          '- O PROXIMO PASSO deve dizer o caminho mais seguro para cumprir a atividade mesmo sem depender da ferramenta.',
-        ]
-      : []),
+    'Nunca escreva analise interna. Apenas a resposta final para o aluno.',
   ].join('\n')
 }
 
-function buildRetryPrompt(input: {
-  topic: PublicTopic
-  question: string
-  intent: QuestionIntent
-  previousAnswer: string
-  qualityReason: string
-  missingSections: string[]
-  rankedChunks: PublishedKnowledgeChunk[]
-}) {
-  return [
-    buildPrompt(input),
-    '',
-    'Sua resposta anterior ficou insuficiente.',
-    `Motivo da rejeicao: ${input.qualityReason}`,
-    `Blocos faltando ou fracos: ${input.missingSections.length > 0 ? input.missingSections.join(', ') : 'resposta direta'}`,
-    '',
-    'Agora corrija com estas exigencias extras:',
-    '- Primeiro responda a duvida principal sem enrolar.',
-    '- Remova links, prazo, horario, professor, curso, modulo, status e nome bruto de arquivo.',
-    '- Se a pergunta pedir dica, caminho, ajuda pratica ou "nao entendi", transforme isso em orientacao de execucao.',
-    '- Se a pergunta for vaga, peca reformulacao curta e ofereca dois exemplos uteis.',
-    '- Nao diga para consultar documentacao generica.',
-    '- Nao devolva apenas titulo, frase motivacional, resumo vago ou texto copiado do PDF.',
-    '- Mantenha os mesmos blocos obrigatorios.',
-    ...(input.intent === 'tool_usage'
-      ? [
-          '- Para pergunta sobre ferramenta, a RESPOSTA DIRETA precisa deixar claro se isso e obrigatorio ou apenas opcional.',
-          '- Se a ferramenta nao estiver no material, diga isso logo na primeira frase.',
-          '- Em seguida, diga como ela poderia ajudar opcionalmente sem mudar os entregaveis oficiais.',
-          '- O PROXIMO PASSO deve ancorar o aluno na entrega real, nao na ferramenta.',
-        ]
-      : []),
-    '',
-    'Resposta anterior ruim:',
-    input.previousAnswer,
-  ].join('\n')
+function buildPromptContextDescription(topic: PublicTopic, citations: Citation[]) {
+  return dedupeItems([
+    buildContextOverview(topic, citations),
+    topic.summary,
+    topic.agentMemory?.overview,
+  ]).find(Boolean) ?? ''
 }
 
-function buildDocuments(topic: PublicTopic, citations: Citation[]) {
+function selectPromptChunks(chunks: PublishedKnowledgeChunk[], intent: QuestionIntent) {
+  const limit = getPromptChunkLimit(intent)
+  const preferredSourceTypes = getPreferredPromptSourceTypes(intent)
+  const prioritized = chunks.filter((chunk) => preferredSourceTypes.includes(chunk.sourceType))
+  const fallback = chunks.filter((chunk) => !preferredSourceTypes.includes(chunk.sourceType))
+  return [...prioritized, ...fallback].slice(0, limit)
+}
+
+function getPromptChunkLimit(intent: QuestionIntent) {
+  if (intent === 'deliverable' || intent === 'grading' || intent === 'format' || intent === 'tool_usage') {
+    return 3
+  }
+
+  return 2
+}
+
+function getPreferredPromptSourceTypes(intent: QuestionIntent) {
+  switch (intent) {
+    case 'deliverable':
+      return ['deliverable', 'content', 'faq']
+    case 'grading':
+    case 'format':
+      return ['content', 'deliverable', 'faq']
+    case 'tool_usage':
+    case 'off_topic_learning':
+      return ['overview', 'summary', 'faq']
+    case 'explanation':
+    case 'summary':
+      return ['summary', 'overview', 'faq']
+    case 'next_steps':
+    case 'unknown':
+    case 'greeting':
+      return ['overview', 'deliverable', 'summary']
+    default:
+      return ['summary', 'overview', 'deliverable']
+  }
+}
+
+function promptChunksToCitations(topic: PublicTopic, chunks: PublishedKnowledgeChunk[]) {
+  return chunks.map((chunk) => ({
+    sourceType: chunk.sourceType === 'overview' ? 'summary' : chunk.sourceType,
+    sourceLabel: `${topic.title} / ${chunk.sourceType}`,
+    snippet: chunk.text,
+  })) satisfies Citation[]
+}
+
+function buildDocuments(topic: PublicTopic, citations: Citation[], intent?: QuestionIntent) {
+  if (intent === 'smalltalk_or_noise') {
+    return [
+      {
+        name: `${topic.id}.summary.txt`,
+        content: buildContextOverview(topic, citations),
+      },
+    ].filter((item) => item.content.trim())
+  }
+
   const normalizedLearning = normalizeLearning(topic.learning)
   const deliverables = buildDeliverableItems(topic, citations)
   const attention = buildAttentionItems(topic, citations)
-
-  return [
+  const documents = [
     {
       name: `${topic.id}.summary.txt`,
       content: buildContextOverview(topic, citations),
@@ -610,6 +743,20 @@ function buildDocuments(topic: PublicTopic, citations: Citation[]) {
       content: citations.map((item) => `${item.sourceType}: ${cleanProviderSnippet(item.snippet)}`).join('\n'),
     },
   ].filter((item) => item.content.trim())
+
+  if (intent === 'deliverable' || intent === 'grading' || intent === 'format') {
+    return documents.filter((item) => item.name.endsWith('.summary.txt') || item.name.endsWith('.citations.txt'))
+  }
+
+  if (intent === 'tool_usage' || intent === 'off_topic_learning' || intent === 'next_steps' || intent === 'unknown' || intent === 'greeting') {
+    return documents.filter((item) => item.name.endsWith('.summary.txt') || item.name.endsWith('.memory.txt'))
+  }
+
+  if (intent === 'explanation' || intent === 'summary') {
+    return documents.filter((item) => !item.name.endsWith('.citations.txt') || citations.length > 0).slice(0, 3)
+  }
+
+  return documents.slice(0, 3)
 }
 
 async function readTopicImages(topic: PublicTopic) {
@@ -834,12 +981,13 @@ function evaluateAnswerQuality(input: {
     const toolMentionPattern = new RegExp(`\\b${toolContext.toolKey}\\b`, 'i')
     const mentionsQuestion = toolMentionPattern.test(combinedDirect)
     const redirectsAction = hasActionableStep(input.parsed.nextSteps)
-    const marksOptionality = new RegExp(`\\b(opcional|obrigatori|nao foi exigid|nao e obrigatori|nao aparece como exigenc|nao encontrei .*${toolContext.toolKey}|${toolContext.toolKey} .*opcional|${toolContext.toolKey} .*nao foi exigid)\\b`, 'i').test(combinedDirect)
-    const explainsPracticalUsage = /\b(organizar|limpar|analisar|consolidar|apoiar|resumir|tratar|usar .* para)\b/.test(combinedAll)
+    const marksOptionality = new RegExp(`\\b(opcional|obrigatori|nao foi exigid|nao e obrigatori|nao aparece como exigenc|nao encontrei .*${toolContext.toolKey}|${toolContext.toolKey} .*opcional|${toolContext.toolKey} .*nao foi exigid|nao e necessar|nao precisa|nao .* agora)\\b`, 'i').test(combinedAll)
+    const reframesCurrentPriority = /\b(foco|foca|prioriza|priorize|primeiro|antes|agora|atividade|checkpoint|trabalho|entrega|entregaveis|arquivos)\b/.test(combinedAll)
     const anchorsDeliverable = /\b(entrega|entregavel|pdf|excel|planilha|arquivo|teams|apresenta)\b/.test(combinedAll)
+    const practicalRedirect = redirectsAction || /\b(confirme|finalize|valide|organize|retome|estude .* depois|depois da entrega|volte nisso depois)\b/.test(combinedAll)
     const inventsMandatoryUsage = !toolContext.hasExplicitRequirement && /\b(use|instale|roda|rode|aplique)\s+python\b/.test(combinedDirect) && !marksOptionality
 
-    if (!mentionsQuestion || !redirectsAction || !marksOptionality || !explainsPracticalUsage || !anchorsDeliverable || inventsMandatoryUsage) {
+    if (!mentionsQuestion || !practicalRedirect || !(marksOptionality || reframesCurrentPriority) || !anchorsDeliverable || inventsMandatoryUsage) {
       if (!missingSections.includes('RESPOSTA DIRETA')) {
         missingSections.push('RESPOSTA DIRETA')
       }
@@ -849,13 +997,38 @@ function evaluateAnswerQuality(input: {
     }
   }
 
+  const blockingSections = getBlockingMissingSections(input.intent)
+  const blockingMissingSections = dedupeItems(missingSections.filter((item) => blockingSections.has(item)))
+
   return {
-    accepted: missingSections.length === 0,
+    accepted: blockingMissingSections.length === 0,
     reason:
-      missingSections.length === 0
+      blockingMissingSections.length === 0
         ? 'Resposta validada pela IA.'
-        : `Resposta insuficiente para a intencao ${input.intent}; faltou autosuficiencia em ${missingSections.join(', ')}.`,
+        : `Resposta insuficiente para a intencao ${input.intent}; faltou autosuficiencia em ${blockingMissingSections.join(', ')}.`,
     missingSections,
+  }
+}
+
+function getBlockingMissingSections(intent: QuestionIntent) {
+  switch (intent) {
+    case 'deliverable':
+      return new Set(['RESPOSTA DIRETA', 'O QUE ENTREGAR'])
+    case 'grading':
+    case 'format':
+      return new Set(['RESPOSTA DIRETA', 'ATENCAO'])
+    case 'tool_usage':
+    case 'next_steps':
+    case 'explanation':
+    case 'unknown':
+    case 'off_topic_learning':
+      return new Set(['RESPOSTA DIRETA', 'PROXIMO PASSO'])
+    case 'smalltalk_or_noise':
+    case 'summary':
+    case 'greeting':
+      return new Set(['RESPOSTA DIRETA'])
+    default:
+      return new Set(['RESPOSTA DIRETA'])
   }
 }
 
@@ -908,6 +1081,18 @@ function parseStructuredAnswer(answer: string | undefined): ParsedStructuredAnsw
 
   if (!parsed.direct) {
     parsed.direct = parsed.extra[0] || sanitizeAnswerText(answer ?? '')
+  }
+
+  if (parsed.deliverables.length === 0) {
+    parsed.deliverables.push(...extractDeliverableSignals(answer ?? ''))
+  }
+
+  if (parsed.attention.length === 0) {
+    parsed.attention.push(...extractAttentionSignals(answer ?? ''))
+  }
+
+  if (parsed.nextSteps.length === 0) {
+    parsed.nextSteps.push(...extractNextStepSignals(answer ?? ''))
   }
 
   return parsed
@@ -1100,6 +1285,28 @@ function extractDeliverableSignals(text: string) {
   }
 
   return cleanDeliverableItems(results)
+}
+
+function extractAttentionSignals(text: string) {
+  const sentences = sanitizeAnswerText(text)
+    .split(/\.\s+|\n+/)
+    .map((item) => sanitizeAnswerText(item))
+    .filter(Boolean)
+
+  return cleanAttentionItems(
+    sentences.filter((item) => /\b(atencao|cuidado|evite|risco|penalidade|erro|abnt|links?|respondentes reais|dados ficticios|matricula|nome completo)\b/i.test(item)),
+  )
+}
+
+function extractNextStepSignals(text: string) {
+  const sentences = sanitizeAnswerText(text)
+    .split(/\.\s+|\n+/)
+    .map((item) => sanitizeAnswerText(item))
+    .filter(Boolean)
+
+  return cleanNextStepItems(
+    sentences.filter((item) => /\b(comece|abra|prepare|monte|revise|confirme|valide|envie|faca|faça|organize|retome|estude|pergunte)\b/i.test(item)),
+  )
 }
 
 function extractToolLabel(question: string) {

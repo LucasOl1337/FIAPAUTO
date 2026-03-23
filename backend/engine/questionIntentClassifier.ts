@@ -15,6 +15,7 @@ export type QuestionIntent =
 
 const intentRules: Array<{ intent: QuestionIntent; pattern: RegExp }> = [
   { intent: 'smalltalk_or_noise', pattern: /^(teste|testes?|blz|beleza|ok|opa|oi|ola|eai|ae|aee|tudo bem|bom dia|boa tarde|boa noite)[!.? ]*$/i },
+  { intent: 'smalltalk_or_noise', pattern: /\b(eu sou|sou um|sou uma|voce acha|vc acha)\b.*\b(burro|idiota|otario|lixo|cachorro|cachorra|cafchorro|feio|inutil)\b/i },
   { intent: 'numbered_item', pattern: /\b(topico|item|questao|parte|exercicio)\s*(numero\s*)?\d+\b/i },
   { intent: 'off_topic_learning', pattern: /\b(me ensina|me explique|quero aprender|como aprende[rm]?|o que e|o que é|conceito de|fundamentos? de)\s+(python|programacao|programação|algoritmo|ia|inteligencia artificial|estatistica|r\b|excel)\b/i },
   { intent: 'tool_usage', pattern: /\b(python|script|codigo|programacao|programar|r\b|excel\b|planilha\b|como usar|como aplicar|da para fazer com|usar nisso|usar isso)\b/i },
@@ -45,6 +46,10 @@ export function classifyQuestionIntent(question: string): QuestionIntent {
     return 'smalltalk_or_noise'
   }
 
+  if (looksLikePersonalNoise(normalized) && !hasAcademicSignals(normalized)) {
+    return 'smalltalk_or_noise'
+  }
+
   return 'unknown'
 }
 
@@ -56,4 +61,13 @@ function normalizeQuestion(value: string) {
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+function looksLikePersonalNoise(normalized: string) {
+  return /\b(eu sou|sou um|sou uma|voce acha|vc acha)\b/.test(normalized)
+    || /\b(burro|idiota|otario|lixo|cachorro|cachorra|cafchorro|feio|inutil)\b/.test(normalized)
+}
+
+function hasAcademicSignals(normalized: string) {
+  return /\b(entregar|entregavel|checklist|passos|proximos passos|materia|trabalho|atividade|pdf|excel|nota|topico|item|questao|prazo|resumo|explica)\b/.test(normalized)
 }

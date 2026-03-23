@@ -18,7 +18,13 @@ export function WorksView({ controller }: WorksViewProps) {
   const answerNextSteps = topicAnswer?.nextSteps ?? []
   const answerCitations = topicAnswer?.citations ?? []
   const answerSuggestions = answerSections?.followUpQuestions ?? topicAnswer?.suggestedQuestions ?? []
-  const answerSourceLabel = topicAnswer?.providerUsed === 'ollama' ? 'Resposta com IA' : answerSections?.answerMode === 'general_guidance' ? 'Explicacao complementar' : 'Baseada na materia'
+  const answerSourceLabel = topicAnswer
+    ? topicAnswer.answeredByPass === 'cache'
+      ? 'Resposta com IA (cache validado)'
+      : topicAnswer.providerUsed === 'ollama' || topicAnswer.providerUsed === 'qwen'
+        ? 'Resposta com IA'
+        : 'Resposta do agente'
+    : 'Resposta do agente'
   const allSummarySections = extractSummarySections(controller.topicSummary?.summary || controller.selectedTopic?.summary)
   const summarySections = allSummarySections.filter((item) => !/^(prazo|entregaveis?)$/i.test(item.label))
   const userDeliverables = buildUserDeliverables({
@@ -99,7 +105,7 @@ export function WorksView({ controller }: WorksViewProps) {
                 ) : <p className="rich-paragraph">A resposta contextual do agente aparecera aqui.</p>}
 
                 {topicAnswer ? <div className="user-focus-grid">
-                  <div className="meta-card clean-card"><span>Como o sistema respondeu</span><div className="user-list"><p>{answerSourceLabel}</p>{topicAnswer.providerUsed === 'ollama' ? <p>O sistema filtrou a resposta com IA usando o contexto desta materia.</p> : answerSections?.answerMode === 'general_guidance' ? <p>O sistema conectou sua duvida com a materia e complementou a explicacao.</p> : <p>O sistema respondeu com base no material salvo desta materia.</p>}</div></div>
+                  <div className="meta-card clean-card"><span>Como a IA respondeu</span><div className="user-list"><p>{answerSourceLabel}</p>{topicAnswer.answeredByPass === 'cache' ? <p>A resposta foi reaproveitada apenas porque a mesma pergunta ja havia sido validada antes pela IA para esta materia.</p> : <p>O agente respondeu com IA considerando o contexto atual da materia e o que voce realmente perguntou.</p>}</div></div>
                   <div className="meta-card clean-card"><span>Proxima pergunta util</span><div className="user-list">{suggestionItems.length > 0 ? suggestionItems.map((item) => <p key={item}>{item}</p>) : <p>Se quiser, pergunte sobre entregaveis, checklist ou criterios.</p>}</div></div>
                   <div className="meta-card clean-card"><span>Proximo passo recomendado</span><div className="user-list">{nextActionItems.length > 0 ? nextActionItems.map((step) => <p key={step}>{step}</p>) : <p>Tente perguntar de forma mais objetiva sobre o trabalho.</p>}</div></div>
                 </div> : null}

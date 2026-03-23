@@ -3,15 +3,14 @@ import type {
   PublicManifest,
   PublicTopic,
   PublicTopicListItem,
-  PublishedKnowledgeChunk,
   PublicSyncStatus,
 } from '@fiapauto/backend/contracts'
-import { askOllamaCloudTopic, isOllamaCloudConfigured } from './ollamaCloud.ts'
 import { resolvePublicApiBase } from '../publicApiBase.ts'
-import { answerPublishedTopicQuestion } from './publicAssistant.ts'
 
 const PUBLIC_API_BASE = resolvePublicApiBase()
 const STATIC_PUBLIC_BASE = '/published'
+const PUBLIC_API_TIMEOUT_MS = Number(import.meta.env.VITE_PUBLIC_API_TIMEOUT_MS ?? '8000') || 8000
+const PUBLIC_CHAT_TIMEOUT_MS = Number(import.meta.env.VITE_PUBLIC_CHAT_TIMEOUT_MS ?? '90000') || 90000
 
 export type PublicTopicChatResult = {
   topicId: string
@@ -27,7 +26,7 @@ export type PublicTopicChatResult = {
   fallbackLevel?: number
   qualityStatus: 'accepted' | 'regenerated' | 'fallback'
   qualityReason: string
-  answeredByPass: 'primary' | 'retry' | 'local'
+  answeredByPass: 'primary' | 'retry' | 'local' | 'cache'
   missingSections?: string[]
 }
 
@@ -87,55 +86,24 @@ export async function fetchPublicTopic(topicId: string) {
 }
 
 export async function askPublicTopic(input: { topicId: string; question: string }) {
-  if (PUBLIC_API_BASE) {
-    const response = await fetchPublicApiWithRetry('/api/public/chat/topic', {
-      method: 'POST',
-      headers: await buildPublicHeaders(),
-      body: JSON.stringify(input),
-    })
-    if (!response.ok) {
-      throw new Error('public_chat_failed')
-    }
-
-    const payload = (await response.json()) as PublicTopicChatResult
-    if (shouldAcceptPublicApiChatResult(payload) || !isOllamaCloudConfigured()) {
-      return payload
-    }
-
-    return recoverWithDirectOllama(input, payload)
+  if (!PUBLIC_API_BASE) {
+    throw new Error('public_chat_api_base_missing')
   }
 
-  const [topic, chunks] = await Promise.all([
-    fetchPublicTopic(input.topicId),
-    fetchStaticJson<PublishedKnowledgeChunk[]>('/knowledge/chunks.json', 'public_chat_failed'),
-  ])
-
-  return answerPublishedTopicQuestion({
-    topic,
-    chunks,
-    question: input.question,
-  }) satisfies PublicTopicChatResult
-}
-
-async function recoverWithDirectOllama(
-  input: { topicId: string; question: string },
-  fallbackPayload: PublicTopicChatResult,
-) {
-  try {
-    const [topic, chunks] = await Promise.all([
-      fetchPublicTopic(input.topicId),
-      fetchStaticJson<PublishedKnowledgeChunk[]>('/knowledge/chunks.json', 'public_chat_failed'),
-    ])
-
-    return await askOllamaCloudTopic({
-      topic,
-      chunks,
-      question: input.question,
-      buildAssetUrl: buildPublicAssetUrl,
-    })
-  } catch {
-    return fallbackPayload
+  const response = await fetchPublicApiWithRetry('/api/public/chat/topic', {
+    method: 'POST',
+    headers: await buildPublicHeaders(),
+    body: JSON.stringify(input),
+  }, {
+    attempts: 1,
+    timeoutMs: PUBLIC_CHAT_TIMEOUT_MS,
+  })
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null
+    throw new Error(payload?.error || 'public_chat_failed')
   }
+
+  return (await response.json()) as PublicTopicChatResult
 }
 
 export async function fetchPublicSyncStatus() {
@@ -204,20 +172,41 @@ async function fetchStaticJson<T>(path: string, errorCode: string) {
   return (await response.json()) as T
 }
 
-async function fetchPublicApiWithRetry(path: string, init: RequestInit, attempts = 3) {
+async function fetchPublicApiWithRetry(
+  path: string,
+  init: RequestInit,
+  options?: {
+    attempts?: number
+    timeoutMs?: number
+  },
+) {
+  const attempts = Math.max(1, options?.attempts ?? 3)
+  const timeoutMs = Math.max(1000, options?.timeoutMs ?? PUBLIC_API_TIMEOUT_MS)
   let lastError: unknown
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(() => controller.abort('public_api_timeout'), timeoutMs)
+
     try {
-      const response = await fetch(buildPublicApiUrl(path), init)
+      const response = await fetch(buildPublicApiUrl(path), {
+        cache: 'no-store',
+        ...init,
+        signal: controller.signal,
+      })
       if (!isTransientPublicApiStatus(response.status) || attempt === attempts - 1) {
         return response
       }
     } catch (error) {
       lastError = error
+      if (error instanceof DOMException && error.name === 'AbortError' && attempt === attempts - 1) {
+        throw new Error('public_api_timeout')
+      }
       if (attempt === attempts - 1) {
         throw error
       }
+    } finally {
+      window.clearTimeout(timeoutId)
     }
 
     await delay(350 * (attempt + 1))
@@ -232,8 +221,4 @@ function isTransientPublicApiStatus(status: number) {
 
 function delay(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
-}
-
-function shouldAcceptPublicApiChatResult(payload: PublicTopicChatResult) {
-  return payload.providerUsed !== 'local' && payload.qualityStatus !== 'fallback'
 }

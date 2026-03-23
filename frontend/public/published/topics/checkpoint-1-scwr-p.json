@@ -5,7 +5,7 @@
   "moduleKey": "ia-aplicada",
   "status": "upcoming",
   "dueText": "Prazo de entrega às 07:45",
-  "summary": "Contexto: Curso 1TIAPF-2026, disciplina Statistical Computing with R & Python, módulo ia-aplicada.\nObjetivo: Pesquisa em grupo com mínimo 100 respondentes reais e apresentação oral individual.\nEntregaveis: Apresentação PDF, formulário PDF e base Excel no Teams.\nPrazo: Data nao identificada no material.\nPontos de atencao: Máximo 6 por grupo, sem dados fictícios, atraso superior a 15 minutos cancela entrega, ausência na oral gera nota zero. Seguir normas ABNT e formatos sem links.",
+  "summary": "Contexto: Curso 1TIAPF-2026, disciplina Statistical Computing with R & Python, módulo ia-aplicada.\nObjetivo: Pesquisa em grupo com mínimo 100 respondentes reais e apresentação oral individual.\nEntregaveis: Apresentação PDF, formulário PDF e base Excel no Teams.\nPontos de atencao: Máximo 6 por grupo, sem dados fictícios, atraso superior a 15 minutos cancela entrega, ausência na oral gera nota zero. Seguir normas ABNT e formatos sem links.",
   "summaryGeneratedAt": "2026-03-20T20:30:44.859Z",
   "agentMemory": {
     "overview": "Contexto: Curso 1TIAPF-2026, disciplina Statistical Computing with R & Python, módulo ia-aplicada.\nObjetivo: Pesquisa em grupo com mínimo 100 respondentes reais e apresentação oral individual.\nEntregáveis: Apresentação PDF, formulário PDF e base Excel no Teams.\nPrazo: Até às 07:45, data específica não foi encontrada no texto.\nPontos de atenção: Máximo 6 por grupo, sem dados fictícios, atraso superior a 15 minutos cancela entrega, ausência na oral gera nota zero. Seguir normas ABNT e formatos sem links.",
@@ -84,41 +84,30 @@
       {
         "question": "O que preciso entregar?",
         "answer": "Voce precisa entregar: apresentacao em PDF, base de dados em Excel."
-      },
-      {
-        "question": "Qual e o prazo dessa atividade?",
-        "answer": "A data exata nao apareceu no material salvo. Abra o anexo principal e confira a data na atividade original."
-      },
-      {
-        "question": "Como comeco esse trabalho?",
-        "answer": "Primeiro, entenda o objetivo central de Checkpoint 1: SCWR&P pelo resumo do trabalho. Depois, monte uma checklist com apresentacao em PDF, base de dados em Excel. Por fim, confirme manualmente a data no PDF principal antes de enviar."
-      },
-      {
-        "question": "O que pode me fazer perder pontos?",
-        "answer": "Fique atento principalmente a: nao use dados ficticios; evite entregar com atraso; garanta a participacao de todos quando houver apresentacao oral; siga formato pedido e normas do enunciado."
       }
     ],
-    "simpleConcepts": [
+    "learningTopics": [
       {
-        "title": "Como entender a atividade",
-        "content": "Contexto: Curso 1TIAPF-2026, disciplina Statistical Computing with R & Python, módulo ia-aplicada.\nObjetivo: Pesquisa em grupo com mínimo 100 respondentes reais e apresentação oral individual.\nEntregaveis: Apresentação PDF, formulário PDF e base Excel no Teams.\nPrazo: Data nao identificada no material.\nPontos de atencao: Máximo 6 por grupo, sem dados fictícios, atraso superior a 15 minutos cancela entrega, ausência na oral gera nota zero. Seguir normas ABNT e formatos sem links."
+        "title": "Entenda o objetivo central",
+        "explanation": "Leia o enunciado de Checkpoint 1: SCWR&P pensando no resultado final que a atividade quer avaliar.",
+        "commonDifficulty": "Muita gente mistura objetivo da atividade com a lista de arquivos que precisa enviar.",
+        "studyStrategy": "Resuma em uma frase o objetivo do trabalho e depois confira onde cada parte aparece no enunciado."
       },
       {
-        "title": "O que entregar na pratica",
-        "content": "Pense nessa atividade como uma entrega composta por: apresentacao em PDF, base de dados em Excel."
+        "title": "Separe o que precisa ser entregue",
+        "explanation": "Organize a entrega em partes claras: apresentacao em PDF, base de dados em Excel.",
+        "commonDifficulty": "Um erro comum e deixar para descobrir o formato ou o arquivo final so no fim da execucao.",
+        "studyStrategy": "Monte uma checklist simples com apresentacao em PDF, base de dados em Excel e valide cada item antes de enviar."
       },
       {
-        "title": "Como resolver sem se perder",
-        "content": "Primeiro, entenda o objetivo central de Checkpoint 1: SCWR&P pelo resumo do trabalho. Depois, monte uma checklist com apresentacao em PDF, base de dados em Excel. Por fim, confirme manualmente a data no PDF principal antes de enviar."
-      },
-      {
-        "title": "Cuidados importantes",
-        "content": "nao use dados ficticios evite entregar com atraso garanta a participacao de todos quando houver apresentacao oral siga formato pedido e normas do enunciado"
+        "title": "Evite retrabalho e perda de pontos",
+        "explanation": "Os pontos de atencao principais aqui sao: nao use dados ficticios, garanta a participacao de todos quando houver apresentacao oral, siga formato pedido e normas do enunciado.",
+        "commonDifficulty": "A parte que mais confunde costuma ser esquecer regra de submissao, formato ou requisito individual do grupo.",
+        "studyStrategy": "Reserve a revisao final para conferir nomes, formato e regras da entrega."
       }
     ],
     "quickTips": [
       "Separe cedo os arquivos pedidos: apresentacao em PDF, base de dados em Excel.",
-      "Confirme a data no PDF principal para nao depender so do resumo.",
       "nao use dados ficticios"
     ]
   },
@@ -135,5 +124,5 @@
     "assets/screenshots/checkpoint-1-scwr-p/checkpoint-1-scwr-p-list-f0df66680d.png",
     "assets/screenshots/checkpoint-1-scwr-p/checkpoint-1-scwr-p-detail-6e3119df07.png"
   ],
-  "updatedAt": "2026-03-21T16:42:53.262Z"
+  "updatedAt": "2026-03-22T16:50:44.620Z"
 }

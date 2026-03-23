@@ -34,6 +34,8 @@ export const runtimePaths = {
   automationLogFile: path.join(runtimeDir, 'logs', 'automation.log'),
   apiLogFile: path.join(runtimeDir, 'logs', 'api.log'),
   llmDebugHistoryFile: path.join(runtimeDir, 'logs', 'llm-debug-history.jsonl'),
+  publicChatEventsFile: path.join(runtimeDir, 'logs', 'public-chat-events.jsonl'),
+  publicTrafficSnapshotFile: path.join(runtimeDir, 'logs', 'public-traffic.json'),
   decisionHistoryFile: path.join(runtimeDir, 'logs', 'logic-debug-history.jsonl'),
   llmBridgeLogFile: path.join(runtimeDir, 'logs', 'llm3.log'),
   llmBridgeErrorFile: path.join(runtimeDir, 'logs', 'llm3.err.log'),

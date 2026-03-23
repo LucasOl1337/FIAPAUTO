@@ -2,7 +2,10 @@ import type { PublicChatResponse, PublicTopic, PublishedKnowledgeChunk } from '@
 
 const OLLAMA_API_KEY = import.meta.env.VITE_OLLAMA_API_KEY?.trim() ?? ''
 const OLLAMA_BASE_URL = (import.meta.env.VITE_OLLAMA_BASE_URL?.trim() || 'https://ollama.com').replace(/\/+$/, '')
-const OLLAMA_MODEL = import.meta.env.VITE_OLLAMA_MODEL?.trim() || 'gpt-oss:20b'
+const OLLAMA_MODEL =
+  import.meta.env.VITE_OLLAMA_MODEL?.trim()
+  || import.meta.env.VITE_PUBLIC_LLM_MODEL?.trim()
+  || 'qwen3.5:397b-cloud'
 const OLLAMA_MAX_IMAGES = Number(import.meta.env.VITE_OLLAMA_MAX_IMAGES ?? '2') || 2
 
 type PublicCloudChatResponse = {

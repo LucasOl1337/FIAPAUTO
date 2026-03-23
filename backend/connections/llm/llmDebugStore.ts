@@ -1,24 +1,12 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import type { LlmDebugEvent } from '../../apis/contracts/index.ts'
 import { runtimePaths } from '../../config/runtimePaths.ts'
 
 const outputDir = runtimePaths.logsDir
 const historyFile = runtimePaths.llmDebugHistoryFile
 const maxTextChars = 12000
 const maxEvents = 200
-
-export type LlmDebugEvent = {
-  id: string
-  ts: string
-  endpoint: '/api/upload' | '/api/chat'
-  jobId: string
-  topicId?: string
-  statusCode: number
-  durationMs: number
-  request: unknown
-  response: unknown
-  error?: string
-}
 
 export async function appendLlmDebugEvent(event: LlmDebugEvent) {
   await fs.mkdir(outputDir, { recursive: true })
@@ -46,11 +34,8 @@ export async function readLlmDebugHistory(limit = 50, topicId?: string) {
       .filter((item): item is LlmDebugEvent => Boolean(item))
       .reverse()
 
-    if (!topicId) {
-      return events
-    }
-
-    return events.filter((event) => event.topicId === topicId)
+    const filtered = topicId ? events.filter((event) => event.topicId === topicId) : events
+    return filtered.map((event) => truncateEventForRead(event))
   } catch {
     return []
   }
@@ -101,7 +86,7 @@ export function sanitizeChatRequest(payload: unknown) {
   return {
     mode: source.mode,
     model: source.model,
-    message: truncateText(source.message),
+    message: preserveText(source.message),
     documents: sanitizeDocuments(source.documents),
     images: sanitizeImages(source.images),
   }
@@ -118,7 +103,7 @@ export function sanitizeChatResponse(payload: unknown) {
   }
 
   return {
-    content: truncateText(source.content),
+    content: preserveText(source.content),
     saved_file: source.saved_file,
   }
 }
@@ -136,7 +121,7 @@ function sanitizeDocuments(value: unknown) {
     const source = item as { name?: unknown; content?: unknown }
     return {
       name: source.name,
-      content: truncateText(source.content),
+      content: preserveText(source.content),
     }
   })
 }
@@ -163,14 +148,40 @@ function sanitizeImages(value: unknown) {
   })
 }
 
-function truncateText(value: unknown) {
+function preserveText(value: unknown) {
   if (typeof value !== 'string') {
     return value
   }
+  return value
+}
 
-  if (value.length <= maxTextChars) {
-    return value
+function truncateEventForRead(event: LlmDebugEvent): LlmDebugEvent {
+  return {
+    ...event,
+    request: truncateUnknown(event.request),
+    response: truncateUnknown(event.response),
+    error: truncateUnknown(event.error) as string | undefined,
+  }
+}
+
+function truncateUnknown(value: unknown): unknown {
+  if (typeof value === 'string') {
+    if (value.length <= maxTextChars) {
+      return value
+    }
+
+    return `${value.slice(0, maxTextChars)}...[truncated ${value.length - maxTextChars} chars]`
   }
 
-  return `${value.slice(0, maxTextChars)}...[truncated ${value.length - maxTextChars} chars]`
+  if (Array.isArray(value)) {
+    return value.map((item) => truncateUnknown(item))
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, truncateUnknown(entry)]),
+    )
+  }
+
+  return value
 }

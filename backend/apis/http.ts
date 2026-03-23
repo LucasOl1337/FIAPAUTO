@@ -34,6 +34,26 @@ export async function readJsonBody(request: http.IncomingMessage) {
   return JSON.parse(raw) as Record<string, unknown>
 }
 
+export function readClientIp(request: http.IncomingMessage) {
+  const forwardedFor = request.headers['x-forwarded-for']
+  const realIp = request.headers['x-real-ip']
+
+  const forwardedValue = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor
+  if (typeof forwardedValue === 'string' && forwardedValue.trim()) {
+    const [firstIp] = forwardedValue.split(',')
+    if (firstIp?.trim()) {
+      return firstIp.trim()
+    }
+  }
+
+  const realValue = Array.isArray(realIp) ? realIp[0] : realIp
+  if (typeof realValue === 'string' && realValue.trim()) {
+    return realValue.trim()
+  }
+
+  return request.socket.remoteAddress?.trim() || ''
+}
+
 export function isAdminProtectionEnabled() {
   return ADMIN_TOKEN.length > 0 || process.env.NODE_ENV === 'production'
 }

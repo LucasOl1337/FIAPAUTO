@@ -7,6 +7,10 @@ import { AdminOverview } from '../features/admin/AdminOverview.tsx'
 import { AulasView } from '../features/aulas/AulasView.tsx'
 import { LearningView } from '../features/aprendizado/LearningView.tsx'
 import { WorksView } from '../features/trabalhos/WorksView.tsx'
+import { CommunityView } from '../features/community/CommunityHub.tsx'
+import { getAnonymousCommunityViewer } from '../features/community/storage.ts'
+
+const LAUNCHER_PROFILE = (import.meta.env.VITE_LAUNCHER_PROFILE ?? '').trim()
 
 export default function AppShell() {
   const pathname = window.location.pathname.replace(/\/+$/, '') || '/'
@@ -21,13 +25,19 @@ export default function AppShell() {
 
   return (
     <UserAuthGate>
-      {({ userLabel }) => <PublicApp userLabel={userLabel} />}
+      {({ userLabel, userId, isGuest }) => <PublicApp userLabel={userLabel} userId={userId} isGuest={isGuest} />}
     </UserAuthGate>
   )
 }
 
-function PublicApp(props: { userLabel: string }) {
+function PublicApp(props: { userLabel: string; userId: string | null; isGuest: boolean }) {
   const controller = useWorkspaceController('user')
+  const labMode = LAUNCHER_PROFILE === 'lab_preview'
+  const anonymousViewer = getAnonymousCommunityViewer()
+
+  if (typeof document !== 'undefined') {
+    document.title = labMode ? 'FiapFlow LAB' : 'FiapFlow'
+  }
 
   return (
     <main className="simple-app">
@@ -42,6 +52,7 @@ function PublicApp(props: { userLabel: string }) {
           </div>
           {props.userLabel ? (
             <div className="action-row">
+              {labMode ? <span className="admin-badge">LAB PREVIEW {window.location.port || ''}</span> : null}
               <span className="admin-badge">{props.userLabel}</span>
               <button type="button" className="secondary-button" onClick={() => void signOutCurrentUser().then(() => window.location.reload())}>
                 Sair
@@ -52,7 +63,16 @@ function PublicApp(props: { userLabel: string }) {
       </section>
 
       <NavigationTabs activeTab={controller.activeTab} onChange={controller.setActiveTab} />
-      <ContentByTab controller={controller} />
+      <ContentByTab
+        controller={controller}
+        communityViewer={{
+          userId: props.userId ?? anonymousViewer.userId,
+          userLabel: props.userLabel || (props.isGuest ? 'Visitante' : anonymousViewer.userLabel),
+          isGuest: props.isGuest,
+          canParticipate: true,
+          source: props.userId ? 'authenticated' : 'anonymous',
+        }}
+      />
 
       <section className="footer-card compact-footer">
         <p className="eyebrow">Atividade</p>
@@ -100,22 +120,34 @@ function BrandMark() {
 }
 
 function NavigationTabs(props: {
-  activeTab: 'aulas' | 'trabalhos' | 'aprendizado'
-  onChange: (tab: 'aulas' | 'trabalhos' | 'aprendizado') => void
+  activeTab: 'aulas' | 'trabalhos' | 'aprendizado' | 'comunidade'
+  onChange: (tab: 'aulas' | 'trabalhos' | 'aprendizado' | 'comunidade') => void
 }) {
   return (
     <section className="tab-row">
       <button type="button" className={props.activeTab === 'aulas' ? 'tab-button active' : 'tab-button'} onClick={() => props.onChange('aulas')}>Aulas</button>
       <button type="button" className={props.activeTab === 'trabalhos' ? 'tab-button active' : 'tab-button'} onClick={() => props.onChange('trabalhos')}>Trabalhos</button>
       <button type="button" className={props.activeTab === 'aprendizado' ? 'tab-button active' : 'tab-button'} onClick={() => props.onChange('aprendizado')}>Aprendizado</button>
+      <button type="button" className={props.activeTab === 'comunidade' ? 'tab-button active' : 'tab-button'} onClick={() => props.onChange('comunidade')}>Comunidade</button>
     </section>
   )
 }
 
-function ContentByTab(props: { controller: ReturnType<typeof useWorkspaceController> }) {
+function ContentByTab(props: {
+  controller: ReturnType<typeof useWorkspaceController>
+  communityViewer?: {
+    userId: string | null
+    userLabel: string
+    isGuest: boolean
+    canParticipate: boolean
+    source?: 'authenticated' | 'anonymous'
+  }
+}) {
   return props.controller.activeTab === 'aulas'
     ? <AulasView controller={props.controller} />
     : props.controller.activeTab === 'trabalhos'
       ? <WorksView controller={props.controller} />
-      : <LearningView controller={props.controller} />
+      : props.controller.activeTab === 'aprendizado'
+        ? <LearningView controller={props.controller} />
+        : <CommunityView viewer={props.communityViewer ?? { userId: null, userLabel: '', isGuest: false, canParticipate: false }} />
 }

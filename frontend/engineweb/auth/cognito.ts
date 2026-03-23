@@ -2,6 +2,13 @@ import { resolvePublicApiBase } from '../publicApiBase.ts'
 
 type PublicAuthMode = 'local' | 'none'
 
+export type PublicAuthSession = {
+  userId: string
+  email: string
+  userLabel: string
+  isGuest: boolean
+}
+
 const authMode = normalizeAuthMode(import.meta.env.VITE_PUBLIC_AUTH_MODE)
 const LOCAL_AUTH_SESSION_KEY = 'fiapauto.publicAuth.session'
 const LOCAL_AUTH_TOKEN_KEY = 'fiapauto.publicAuth.token'
@@ -27,9 +34,17 @@ export async function getAccessToken() {
 }
 
 export async function getSignedInUserLabel() {
+  return (await getCurrentPublicSession())?.userLabel ?? ''
+}
+
+export function getStoredPublicSession(): PublicAuthSession | null {
+  return readLocalSession()
+}
+
+export async function getCurrentPublicSession(): Promise<PublicAuthSession | null> {
   const token = readLocalAuthToken()
   if (!token) {
-    return readLocalSession()?.email ?? ''
+    return readLocalSession()
   }
 
   try {
@@ -38,11 +53,11 @@ export async function getSignedInUserLabel() {
       token,
     })
     writeLocalSession({ email: session.email || session.userLabel, userLabel: session.userLabel, isGuest: session.isGuest })
-    return session.userLabel
+    return readLocalSession()
   } catch {
     clearLocalSession()
     clearLocalAuthToken()
-    return ''
+    return null
   }
 }
 
@@ -122,7 +137,17 @@ function readLocalSession() {
     }
 
     const parsed = JSON.parse(raw) as { email?: string; userLabel?: string; isGuest?: boolean }
-    return parsed.userLabel ? { email: parsed.email ?? '', userLabel: parsed.userLabel, isGuest: Boolean(parsed.isGuest) } : null
+    if (!parsed.userLabel) {
+      return null
+    }
+
+    const email = parsed.email ?? ''
+    return {
+      userId: email || parsed.userLabel,
+      email,
+      userLabel: parsed.userLabel,
+      isGuest: Boolean(parsed.isGuest),
+    }
   } catch {
     return null
   }

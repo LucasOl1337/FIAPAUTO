@@ -1,0 +1,32 @@
+{
+  "prod_local": {
+    "api_bind_host": "127.0.0.1",
+    "api_port": 43872,
+    "web_bind_host": "127.0.0.1",
+    "web_port": 43871,
+    "web_mode": "dev",
+    "build_before_web": false,
+    "remote_checks_enabled": true,
+    "public_site_url": "https://fiapflow.com.br",
+    "heartbeat_seconds": 15,
+    "web_origin_mode": "fixed",
+    "public_api_base_host": "loopback",
+    "show_lan_url": false,
+    "auto_open_browser": false
+  },
+  "lab_preview": {
+    "api_bind_host": "0.0.0.0",
+    "api_port": 43882,
+    "web_bind_host": "0.0.0.0",
+    "web_port": 43881,
+    "web_mode": "preview",
+    "build_before_web": true,
+    "remote_checks_enabled": false,
+    "public_site_url": "",
+    "heartbeat_seconds": 15,
+    "web_origin_mode": "wildcard",
+    "public_api_base_host": "lan",
+    "show_lan_url": true,
+    "auto_open_browser": true
+  }
+}

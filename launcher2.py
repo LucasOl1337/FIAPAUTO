@@ -6,4 +6,4 @@ from launcher_core import main
 
 
 if __name__ == "__main__":
-    sys.exit(main("prod_local"))
+    sys.exit(main("lab_preview"))

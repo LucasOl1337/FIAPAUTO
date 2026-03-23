@@ -5,47 +5,56 @@
   "moduleKey": "ia-aplicada",
   "status": "upcoming",
   "dueText": "Prazo de entrega às 23:55",
-  "summary": "",
-  "agentMemory": null,
+  "summary": "Objetivo: CP1 - AIC - Entrega do trabalho sobre Scrum.\nEntregaveis: Titulo: CP1 - AIC - Entrega do trabalho sobre Scrum\nPontos de atencao: consulte os anexos e a screenshot da atividade para confirmar os detalhes.\nCurso: 1TIAPF-2026",
+  "summaryGeneratedAt": "2026-03-22T15:48:18.893Z",
+  "agentMemory": {
+    "overview": "Objetivo: CP1 - AIC - Entrega do trabalho sobre Scrum.\nEntregaveis: Titulo: CP1 - AIC - Entrega do trabalho sobre Scrum\nPontos de atencao: consulte os anexos e a screenshot da atividade para confirmar os detalhes.\nCurso: 1TIAPF-2026",
+    "deliverables": [
+      "Titulo: CP1 - AIC - Entrega do trabalho sobre Scrum\nCurso: 1TIAPF-2026\nStatus: upcoming\nLink de detalhe: https://teams.microsoft.com/v2/\nModulo sugerido: ia-aplicada\nArquivos baixados: nenhum"
+    ],
+    "deadlines": [],
+    "faq": [],
+    "keyFacts": [
+      "Objetivo: CP1 - AIC - Entrega do trabalho sobre Scrum.",
+      "Entregaveis: Titulo: CP1 - AIC - Entrega do trabalho sobre Scrum",
+      "Pontos de atencao: consulte os anexos e a screenshot da atividade para confirmar os detalhes.",
+      "Curso: 1TIAPF-2026"
+    ],
+    "answerStyle": "Responder de forma objetiva, curta e sempre dizer quando algo nao foi encontrado.",
+    "fallbackPolicy": "Se a pergunta fugir do material persistido, consultar o LLM e salvar a resposta na memoria.",
+    "sourceSnippets": [
+      "Titulo: CP1 - AIC - Entrega do trabalho sobre Scrum\nCurso: 1TIAPF-2026\nStatus: upcoming\nLink de detalhe: https://teams.microsoft.com/v2/\nModulo sugerido: ia-aplicada\nArquivos baixados: nenhum"
+    ]
+  },
   "learning": {
     "frequentQuestions": [
       {
         "question": "O que preciso entregar?",
-        "answer": "Os entregaveis nao ficaram totalmente claros no material, entao vale abrir o anexo principal para confirmar."
-      },
-      {
-        "question": "Qual e o prazo dessa atividade?",
-        "answer": "A data exata nao apareceu no material salvo. Abra o anexo principal e confira a data na atividade original."
-      },
-      {
-        "question": "Como comeco esse trabalho?",
-        "answer": "Primeiro, entenda o objetivo central de CP1 - AIC - Entrega do trabalho sobre Scrum pelo resumo do trabalho. Depois, abra o anexo principal e anote os entregaveis e formatos exigidos. Por fim, confirme manualmente a data no PDF principal antes de enviar."
-      },
-      {
-        "question": "O que pode me fazer perder pontos?",
-        "answer": "Os criterios de perda de pontos nao ficaram totalmente objetivos no material salvo, entao vale conferir o anexo principal."
+        "answer": "Voce precisa entregar: CP1 - AIC - Entrega do trabalho sobre Scrum."
       }
     ],
-    "simpleConcepts": [
+    "learningTopics": [
       {
-        "title": "Como entender a atividade",
-        "content": "Objetivo: CP1 - AIC - Entrega do trabalho sobre Scrum.\nEntregaveis: Titulo: CP1 - AIC - Entrega do trabalho sobre Scrum\nCurso: 1TIAPF-2026\nStatus: upcoming\nPrazo: Prazo de entrega às 23:55\nLink de detalhe: https://teams.microsoft.com/v2/\nModulo sugerido: ia-aplicada\nArquivos baixados: nenhum\nPrazo: Prazo de entrega às 23:55\nCurso: 1TIAPF-2026. Status: upcoming.\nPontos de atencao: consulte os anexos e a screenshot da atividade para confirmar os detalhes."
+        "title": "Entenda o objetivo central",
+        "explanation": "Leia o enunciado de CP1 - AIC - Entrega do trabalho sobre Scrum pensando no resultado final que a atividade quer avaliar.",
+        "commonDifficulty": "Muita gente mistura objetivo da atividade com a lista de arquivos que precisa enviar.",
+        "studyStrategy": "Resuma em uma frase o objetivo do trabalho e depois confira onde cada parte aparece no enunciado."
       },
       {
-        "title": "O que entregar na pratica",
-        "content": "Comece identificando os arquivos e formatos exigidos no enunciado principal."
+        "title": "Separe o que precisa ser entregue",
+        "explanation": "Organize a entrega em partes claras: CP1 - AIC - Entrega do trabalho sobre Scrum.",
+        "commonDifficulty": "Um erro comum e deixar para descobrir o formato ou o arquivo final so no fim da execucao.",
+        "studyStrategy": "Monte uma checklist simples com CP1 - AIC - Entrega do trabalho sobre Scrum e valide cada item antes de enviar."
       },
       {
-        "title": "Como resolver sem se perder",
-        "content": "Primeiro, entenda o objetivo central de CP1 - AIC - Entrega do trabalho sobre Scrum pelo resumo do trabalho. Depois, abra o anexo principal e anote os entregaveis e formatos exigidos. Por fim, confirme manualmente a data no PDF principal antes de enviar."
-      },
-      {
-        "title": "Cuidados importantes",
-        "content": "Revise o enunciado, confirme formato, prazo e regras da submissao antes de enviar."
+        "title": "Evite retrabalho e perda de pontos",
+        "explanation": "Os detalhes finos de submissao e avaliacao precisam ser conferidos no enunciado principal antes do envio.",
+        "commonDifficulty": "A parte que mais confunde costuma ser esquecer regra de submissao, formato ou requisito individual do grupo.",
+        "studyStrategy": "Reserve a revisao final para conferir nomes, formato e regras da entrega."
       }
     ],
     "quickTips": [
-      "Confirme a data no PDF principal para nao depender so do resumo."
+      "Separe cedo os arquivos pedidos: CP1 - AIC - Entrega do trabalho sobre Scrum."
     ]
   },
   "attachments": [],
@@ -53,5 +62,5 @@
     "assets/screenshots/cp1-aic-entrega-do-trabalho-sobre-scrum/cp1-aic-entrega-do-trabalho-sobre-scrum-list-7cc9ae519d.png",
     "assets/screenshots/cp1-aic-entrega-do-trabalho-sobre-scrum/cp1-aic-entrega-do-trabalho-sobre-scrum-detail-4dc699a026.png"
   ],
-  "updatedAt": "2026-03-21T16:42:53.887Z"
+  "updatedAt": "2026-03-22T17:12:01.275Z"
 }

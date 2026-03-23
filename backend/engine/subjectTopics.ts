@@ -154,7 +154,7 @@ const supportedTextExtensions = new Set([
 ])
 
 const CURRENT_LEARNING_VERSION = 2
-const DEFAULT_LEARNING_MODEL = process.env.LEARNING_LLM_MODEL ?? 'qwen3.5:cloud'
+const DEFAULT_LEARNING_MODEL = process.env.LEARNING_LLM_MODEL ?? 'qwen3.5:397b-cloud'
 
 export async function syncTopicsFromAssignments() {
   await ensureDir(botConfig.subjectsDir)

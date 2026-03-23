@@ -16,11 +16,38 @@ import type {
 } from '@fiapauto/backend/contracts'
 import type { Lesson, WorkspaceState } from '../types.ts'
 
-const BOT_API_BASE = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/+$/, '')
+const BOT_API_PORT = (import.meta.env.VITE_API_PORT?.trim() || import.meta.env.VITE_PUBLIC_API_PORT?.trim() || '')
+const BOT_API_BASE = (resolveBotApiBase() ?? '').replace(/\/+$/, '')
 const ADMIN_TOKEN_STORAGE_KEY = 'fiapauto.admin-token.v1'
 
 function buildApiUrl(path: string) {
   return BOT_API_BASE ? `${BOT_API_BASE}${path}` : path
+}
+
+function resolveBotApiBase() {
+  const runtimeLocalBase = resolveRuntimeLocalApiBase()
+  if (runtimeLocalBase) {
+    return runtimeLocalBase
+  }
+
+  return import.meta.env.VITE_API_BASE_URL ?? ''
+}
+
+function resolveRuntimeLocalApiBase() {
+  if (typeof window === 'undefined' || !BOT_API_PORT) {
+    return ''
+  }
+
+  const hostname = window.location.hostname?.trim()
+  if (!hostname) {
+    return ''
+  }
+
+  if (!/^(127\.0\.0\.1|localhost|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})$/i.test(hostname)) {
+    return ''
+  }
+
+  return `${window.location.protocol}//${hostname}:${BOT_API_PORT}`
 }
 
 function buildAdminHeaders(init?: HeadersInit) {
