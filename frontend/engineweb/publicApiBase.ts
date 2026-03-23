@@ -1,3 +1,7 @@
+const PUBLIC_API_TUNNEL = (
+  import.meta.env.VITE_PUBLIC_API_TUNNEL?.trim()
+  || 'https://fairly-success-rat-physicians.trycloudflare.com'
+)
 const PUBLIC_API_PORT = (import.meta.env.VITE_PUBLIC_API_PORT?.trim() || import.meta.env.VITE_API_PORT?.trim() || '')
 
 export function resolvePublicApiBase() {
@@ -10,8 +14,7 @@ export function resolvePublicApiBase() {
     .filter(Boolean)
 
   const explicitBase = explicitCandidates.find((value) => !shouldIgnoreExplicitApiBase(value))
-  const productionBase = typeof window === 'undefined' ? '' : window.location.origin
-  return (runtimeLocalBase || explicitBase || productionBase).replace(/\/+$/, '')
+  return (runtimeLocalBase || explicitBase || PUBLIC_API_TUNNEL).replace(/\/+$/, '')
 }
 
 function shouldIgnoreExplicitApiBase(value: string) {
