@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/server.ts",
+    "start": "tsx src/server.ts",
     "build": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
