@@ -11,6 +11,11 @@ export type PublicApiEnv = {
   ASSETS: {
     fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
   }
+  OLLAMA_BASE_URL?: string
+  PUBLIC_LLM_MODEL?: string
+  OLLAMA_MODEL?: string
+  PUBLIC_LLM_TIMEOUT_MS?: string
+  OLLAMA_TIMEOUT_MS?: string
 }
 
 const PUBLISHED_ROOT = '/published'
@@ -113,7 +118,8 @@ export async function handlePublicApiRequest(request: Request, env: PublicApiEnv
     }
 
     const chunks = await readPublishedJson<PublishedKnowledgeChunk[]>(env, request, 'knowledge/chunks.json', [])
-    return jsonResponse(buildDeterministicChatResponse(topic, chunks, question))
+    const remoteAnswer = await tryRemoteOllamaChat(env, topic, chunks, question)
+    return jsonResponse(remoteAnswer ?? buildDeterministicChatResponse(topic, chunks, question))
   }
 
   if (url.pathname === '/api/public/auth/sign-up'
@@ -225,6 +231,154 @@ function buildDeterministicChatResponse(topic: PublicTopic, chunks: PublishedKno
     qualityReason: 'Resposta gerada a partir do material publicado no Cloudflare Pages.',
     answeredByPass: 'local',
   }
+}
+
+async function tryRemoteOllamaChat(
+  env: PublicApiEnv,
+  topic: PublicTopic,
+  chunks: PublishedKnowledgeChunk[],
+  question: string,
+) {
+  const baseUrl = normalizeBaseUrl(env.OLLAMA_BASE_URL)
+  if (!baseUrl) {
+    return null
+  }
+
+  const timeoutMs = parseTimeout(env.OLLAMA_TIMEOUT_MS ?? env.PUBLIC_LLM_TIMEOUT_MS, 120000)
+  const model = normalizeModel(env.OLLAMA_MODEL ?? env.PUBLIC_LLM_MODEL ?? 'qwen3.5:397b-cloud')
+  const prompt = buildOllamaPrompt(topic, chunks, question)
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort('ollama_timeout'), timeoutMs)
+
+  try {
+    const response = await fetch(`${baseUrl}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        stream: false,
+        messages: [
+          {
+            role: 'system',
+            content: 'Voce e o assistente academico do FIAPAUTO. Responda em portugues do Brasil, de forma clara e objetiva.',
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+      }),
+      signal: controller.signal,
+    })
+
+    if (!response.ok) {
+      return null
+    }
+
+    const payload = (await response.json()) as {
+      message?: {
+        content?: string
+      }
+      response?: string
+      content?: string
+    }
+
+    const answer = (
+      payload.message?.content
+      ?? payload.response
+      ?? payload.content
+      ?? ''
+    ).trim()
+
+    if (!answer) {
+      return null
+    }
+
+    return buildOllamaChatResponse(topic, chunks, question, answer)
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timeoutId)
+  }
+}
+
+function buildOllamaChatResponse(topic: PublicTopic, chunks: PublishedKnowledgeChunk[], question: string, answer: string): PublicChatResponse {
+  const citations = buildCitations(topic, chunks, question)
+  const deliverables = buildDeliverables(topic)
+  const attentionPoints = buildAttentionPoints(topic)
+  const nextSteps = buildNextSteps(topic, deliverables)
+  const questions = buildSuggestedQuestions(topic)
+  const summary10s = clip(answer.split(/\n+/)[0] ?? answer, 180) || buildSummary(topic, citations)
+
+  return {
+    topicId: topic.id,
+    answer,
+    sections: {
+      summary10s,
+      fullAnswer: [answer],
+      deliverables,
+      attentionPoints,
+      nextSteps,
+      followUpQuestions: questions,
+      answerMode: citations.length >= 2 ? 'grounded' : citations.length === 1 ? 'mixed' : 'general_guidance',
+    },
+    confidence: citations.length >= 2 ? 'high' : citations.length === 1 ? 'medium' : 'low',
+    strategyUsed: 'rag_llm',
+    providerUsed: 'ollama',
+    fallbackLevel: 0,
+    citations,
+    suggestedQuestions: questions,
+    nextSteps,
+    answeredAt: new Date().toISOString(),
+    qualityStatus: 'accepted',
+    qualityReason: 'Resposta gerada pelo Ollama configurado no Cloudflare Pages.',
+    answeredByPass: 'primary',
+  }
+}
+
+function buildOllamaPrompt(topic: PublicTopic, chunks: PublishedKnowledgeChunk[], question: string) {
+  const contextLines = [
+    `Topico: ${topic.title}`,
+    `Curso: ${topic.course}`,
+    `Resumo: ${topic.summary}`,
+    ...(topic.learning?.frequentQuestions ?? []).slice(0, 3).map((item) => `FAQ: ${item.question} - ${item.answer}`),
+    ...(topic.learning?.learningTopics ?? []).slice(0, 3).map((item) => `Aprendizado: ${item.title} - ${item.explanation}`),
+    ...chunks.slice(0, 6).map((chunk) => `${chunk.sourceType}: ${chunk.text}`),
+  ]
+
+  return [
+    'Responda em portugues do Brasil, de forma objetiva e util para um aluno.',
+    'Use apenas o material fornecido abaixo.',
+    'Formato esperado:',
+    'RESPOSTA DIRETA: ...',
+    'O QUE ENTREGAR: ...',
+    'ATENCAO: ...',
+    'PROXIMO PASSO: ...',
+    '',
+    `Pergunta: ${question}`,
+    '',
+    ...contextLines,
+  ].join('\n')
+}
+
+function normalizeBaseUrl(value: string | undefined) {
+  const trimmed = value?.trim() ?? ''
+  if (!trimmed) {
+    return ''
+  }
+
+  return trimmed.replace(/\/+$/, '')
+}
+
+function normalizeModel(value: string) {
+  return value.trim() || 'qwen3.5:397b-cloud'
+}
+
+function parseTimeout(value: string | undefined, fallback: number) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
 }
 
 function buildCitations(topic: PublicTopic, chunks: PublishedKnowledgeChunk[], question: string) {
