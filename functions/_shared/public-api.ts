@@ -213,7 +213,7 @@ async function tryRemoteOllamaChat(
   }
 
   const timeoutMs = parseTimeout(env.OLLAMA_TIMEOUT_MS ?? env.PUBLIC_LLM_TIMEOUT_MS, 120000)
-  const model = normalizeModel(env.OLLAMA_MODEL ?? env.PUBLIC_LLM_MODEL ?? 'qwen3.5:397b-cloud')
+  const model = normalizeModel(env.OLLAMA_MODEL ?? env.PUBLIC_LLM_MODEL ?? 'qwen3:8b')
   const prompt = buildOllamaPrompt(topic, chunks, question)
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort('ollama_timeout'), timeoutMs)
@@ -341,7 +341,7 @@ function normalizeBaseUrl(value: string | undefined) {
 }
 
 function normalizeModel(value: string) {
-  return value.trim() || 'qwen3.5:397b-cloud'
+  return value.trim() || 'qwen3:8b'
 }
 
 function parseTimeout(value: string | undefined, fallback: number) {
