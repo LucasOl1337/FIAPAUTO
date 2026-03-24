@@ -113,3 +113,4 @@ O roadmap imediato do projeto e:
 - [Patch Notes v0.2](patchnotes.md)
 - [Plano de inteligencia de atribuicoes](docs/ASSIGNMENTS_INTELLIGENCE_PLAN.md)
 - [Modulo do bot](docs/BOT_MODULE.md)
+- [Deploy publico com Amplify + Lambda](docs/DEPLOY_AMPLIFY_PUBLIC.md)

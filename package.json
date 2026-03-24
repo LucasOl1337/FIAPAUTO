@@ -39,7 +39,8 @@
     "cloud:build:public-api": "node aws/scripts/build-public-api.mjs",
     "cloud:zip:public-api": "bestzip aws/dist/public-api.zip aws/dist/public-api/*",
     "cloud:prepare:public-api": "npm run cloud:build:public-api && npm run cloud:zip:public-api",
-    "cloud:upload:public-api": "node aws/scripts/upload-public-api-artifact.mjs"
+    "cloud:upload:public-api": "node aws/scripts/upload-public-api-artifact.mjs",
+    "cloud:deploy:public-api": "node aws/scripts/deploy-public-api-stack.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

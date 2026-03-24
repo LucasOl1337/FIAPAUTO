@@ -1,0 +1,33 @@
+name: Deploy Public API
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.FIAPAUTO_AWS_REGION || 'us-east-1' }}
+      FIAPAUTO_AWS_REGION: ${{ vars.FIAPAUTO_AWS_REGION || 'us-east-1' }}
+      FIAPAUTO_PUBLIC_API_STACK_NAME: ${{ vars.FIAPAUTO_PUBLIC_API_STACK_NAME || 'fiapauto-public-api' }}
+      FIAPAUTO_PUBLIC_BUCKET: ${{ secrets.FIAPAUTO_PUBLIC_BUCKET }}
+      FIAPAUTO_LAMBDA_ARTIFACT_BUCKET: ${{ secrets.FIAPAUTO_LAMBDA_ARTIFACT_BUCKET }}
+      FIAPAUTO_LAMBDA_ARTIFACT_KEY: ${{ vars.FIAPAUTO_LAMBDA_ARTIFACT_KEY || 'artifacts/public-api.zip' }}
+      FIAPAUTO_LAMBDA_EXECUTION_ROLE_ARN: ${{ secrets.FIAPAUTO_LAMBDA_EXECUTION_ROLE_ARN }}
+      FIAPAUTO_FRONTEND_ORIGIN: ${{ secrets.FIAPAUTO_FRONTEND_ORIGIN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - run: npm ci --include=dev
+      - run: npm run cloud:deploy:public-api

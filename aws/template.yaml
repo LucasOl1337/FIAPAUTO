@@ -11,10 +11,6 @@ Parameters:
     Type: String
   ExistingLambdaExecutionRoleArn:
     Type: String
-  ExistingCognitoUserPoolId:
-    Type: String
-  ExistingCognitoUserPoolClientId:
-    Type: String
   PublicPrefix:
     Type: String
     Default: fiapauto-public
@@ -128,3 +124,5 @@ Resources:
 Outputs:
   PublicApiUrl:
     Value: !Sub https://${PublicApi}.execute-api.${AWS::Region}.amazonaws.com
+  PublicApiBaseUrl:
+    Value: !Sub https://${PublicApi}.execute-api.${AWS::Region}.amazonaws.com/api/public

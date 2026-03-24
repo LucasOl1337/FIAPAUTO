@@ -13,12 +13,12 @@ const backendRoot = path.join(repoRoot, 'backend')
 loadEnvFile(path.join(backendRoot, '.env'))
 loadEnvFile(path.join(backendRoot, '.env.local'))
 
-const bucket = process.env.FIAPAUTO_PUBLIC_BUCKET?.trim() ?? ''
+const bucket = process.env.FIAPAUTO_LAMBDA_ARTIFACT_BUCKET?.trim() ?? process.env.FIAPAUTO_PUBLIC_BUCKET?.trim() ?? ''
 const region = process.env.FIAPAUTO_AWS_REGION?.trim() ?? process.env.AWS_REGION?.trim() ?? ''
 const key = (process.env.FIAPAUTO_LAMBDA_ARTIFACT_KEY?.trim() ?? 'artifacts/public-api.zip').replace(/^\/+/, '')
 
 if (!bucket) {
-  throw new Error('FIAPAUTO_PUBLIC_BUCKET_not_configured')
+  throw new Error('FIAPAUTO_LAMBDA_ARTIFACT_BUCKET_not_configured')
 }
 
 if (!region) {
