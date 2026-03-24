@@ -12,7 +12,8 @@ export function resolvePublicApiBase() {
 
   const explicitBase = explicitCandidates.find((value) => !shouldIgnoreExplicitApiBase(value))
   const tunnelBase = shouldIgnoreExplicitApiBase(PUBLIC_API_TUNNEL) ? '' : PUBLIC_API_TUNNEL
-  return (runtimeLocalBase || explicitBase || tunnelBase).replace(/\/+$/, '')
+  const sameOriginBase = resolveSameOriginApiBase()
+  return (runtimeLocalBase || explicitBase || tunnelBase || sameOriginBase).replace(/\/+$/, '')
 }
 
 function shouldIgnoreExplicitApiBase(value: string) {
@@ -48,6 +49,23 @@ function resolveRuntimeLocalApiBase() {
   }
 
   return `${window.location.protocol}//${hostname}:${PUBLIC_API_PORT}`
+}
+
+function resolveSameOriginApiBase() {
+  if (typeof window === 'undefined') {
+    return ''
+  }
+
+  const hostname = window.location.hostname?.trim()
+  if (!hostname) {
+    return ''
+  }
+
+  if (isLoopbackHost(hostname) || isPrivateLanHost(hostname) || isEphemeralTunnelHost(hostname)) {
+    return ''
+  }
+
+  return window.location.origin
 }
 
 function isLoopbackHost(hostname: string) {
