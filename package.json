@@ -24,7 +24,7 @@
     "dev:api:public": "npm run dev -w @fiapauto/public-api",
     "dev:api:admin": "npm run dev -w @fiapauto/admin-api",
     "build": "npm run build -w @fiapauto/contracts && npm run build -w @fiapauto/server-core && npm run build -w @fiapauto/backend && npm run build -w @fiapauto/bots && npm run build -w @fiapauto/public-api && npm run build -w @fiapauto/admin-api && npm run build -w @fiapauto/web-public && npm run build -w @fiapauto/web-admin",
-    "lint": "eslint frontend backend apps services packages",
+    "lint": "eslint frontend backend apps services packages functions",
     "preview": "npm run preview -w @fiapauto/web-public",
     "bot:test": "npm run test -w @fiapauto/bots",
     "bot:worker": "npm run worker -w @fiapauto/bots",
@@ -40,7 +40,8 @@
     "cloud:zip:public-api": "bestzip aws/dist/public-api.zip aws/dist/public-api/*",
     "cloud:prepare:public-api": "npm run cloud:build:public-api && npm run cloud:zip:public-api",
     "cloud:upload:public-api": "node aws/scripts/upload-public-api-artifact.mjs",
-    "cloud:deploy:public-api": "node aws/scripts/deploy-public-api-stack.mjs"
+    "cloud:deploy:public-api": "node aws/scripts/deploy-public-api-stack.mjs",
+    "cloud:build:public-pages": "npm run build -w @fiapauto/web-public"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

@@ -114,3 +114,4 @@ O roadmap imediato do projeto e:
 - [Plano de inteligencia de atribuicoes](docs/ASSIGNMENTS_INTELLIGENCE_PLAN.md)
 - [Modulo do bot](docs/BOT_MODULE.md)
 - [Deploy publico com Amplify + Lambda](docs/DEPLOY_AMPLIFY_PUBLIC.md)
+- [Deploy com Cloudflare Pages](docs/DEPLOY_CLOUDFLARE_PAGES.md)

@@ -33,4 +33,14 @@ export default defineConfig([
       globals: globals.node,
     },
   },
+  {
+    files: ['functions/**/*.ts'],
+    extends: [js.configs.recommended, tseslint.configs.recommended],
+    languageOptions: {
+      ecmaVersion: 2020,
+      globals: {
+        ...globals.browser,
+      },
+    },
+  },
 ])
