@@ -118,8 +118,12 @@ export async function handlePublicApiRequest(request: Request, env: PublicApiEnv
     }
 
     const chunks = await readPublishedJson<PublishedKnowledgeChunk[]>(env, request, 'knowledge/chunks.json', [])
-    const remoteAnswer = await tryRemoteOllamaChat(env, topic, chunks, question)
-    return jsonResponse(remoteAnswer ?? buildDeterministicChatResponse(topic, chunks, question))
+    const ollamaAnswer = await tryRemoteOllamaChat(env, topic, chunks, question)
+    if (!ollamaAnswer) {
+      return serviceUnavailable('ollama_unavailable')
+    }
+
+    return jsonResponse(ollamaAnswer)
   }
 
   if (url.pathname === '/api/public/auth/sign-up'
@@ -194,42 +198,6 @@ function normalizeTopicId(pathname: string) {
     return decodeURIComponent(raw).trim()
   } catch {
     return raw.trim()
-  }
-}
-
-function buildDeterministicChatResponse(topic: PublicTopic, chunks: PublishedKnowledgeChunk[], question: string): PublicChatResponse {
-  const citations = buildCitations(topic, chunks, question)
-  const deliverables = buildDeliverables(topic)
-  const attentionPoints = buildAttentionPoints(topic)
-  const nextSteps = buildNextSteps(topic, deliverables)
-  const summary10s = buildSummary(topic, citations)
-  const answer = formatAnswer(summary10s, deliverables, attentionPoints, nextSteps)
-  const confidence: PublicChatResponse['confidence'] = citations.length >= 2 ? 'high' : citations.length === 1 ? 'medium' : 'low'
-  const questions = buildSuggestedQuestions(topic)
-
-  return {
-    topicId: topic.id,
-    answer,
-    sections: {
-      summary10s,
-      fullAnswer: [summary10s, buildFullAnswer(topic, citations)],
-      deliverables,
-      attentionPoints,
-      nextSteps,
-      followUpQuestions: questions,
-      answerMode: citations.length >= 2 ? 'grounded' : citations.length === 1 ? 'mixed' : 'general_guidance',
-    },
-    confidence,
-    strategyUsed: 'deterministic',
-    providerUsed: 'local',
-    fallbackLevel: 0,
-    citations,
-    suggestedQuestions: questions,
-    nextSteps,
-    answeredAt: new Date().toISOString(),
-    qualityStatus: 'accepted',
-    qualityReason: 'Resposta gerada a partir do material publicado no Cloudflare Pages.',
-    answeredByPass: 'local',
   }
 }
 
@@ -468,36 +436,6 @@ function buildSummary(topic: PublicTopic, citations: Array<{ snippet: string }>)
   return clip(fallback, 180)
 }
 
-function buildFullAnswer(topic: PublicTopic, citations: Array<{ snippet: string }>) {
-  const parts = [
-    topic.agentMemory?.overview,
-    topic.learning?.learningTopics?.[0]?.explanation,
-    citations[0]?.snippet,
-  ]
-    .map((item) => item?.trim() ?? '')
-    .filter(Boolean)
-
-  return clip(uniqueNonEmpty(parts).join(' '), 260) || `Resumo consolidado do topico ${topic.title}.`
-}
-
-function formatAnswer(summary10s: string, deliverables: string[], attentionPoints: string[], nextSteps: string[]) {
-  const lines = [`RESPOSTA DIRETA: ${summary10s || 'Pergunte de forma mais especifica sobre este topico.'}`]
-
-  if (deliverables.length > 0) {
-    lines.push(`O QUE ENTREGAR: ${deliverables.map((item) => `- ${item}`).join(' ')}`)
-  }
-
-  if (attentionPoints.length > 0) {
-    lines.push(`ATENCAO: ${attentionPoints.map((item) => `- ${item}`).join(' ')}`)
-  }
-
-  if (nextSteps.length > 0) {
-    lines.push(`PROXIMO PASSO: ${nextSteps.map((item) => `- ${item}`).join(' ')}`)
-  }
-
-  return lines.join('\n')
-}
-
 function scoreChunk(chunk: PublishedKnowledgeChunk, question: string) {
   const questionTokens = tokenize(question)
   const normalizedText = normalize(chunk.text)
@@ -580,6 +518,10 @@ function badRequest(error: string) {
 
 function notFound(error: string) {
   return jsonResponse({ error }, 404)
+}
+
+function serviceUnavailable(error: string) {
+  return jsonResponse({ error }, 503)
 }
 
 function methodNotAllowed(allow: string) {
