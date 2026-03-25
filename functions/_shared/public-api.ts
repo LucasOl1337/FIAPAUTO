@@ -6,12 +6,14 @@ import type {
   PublicTopicListItem,
   PublishedKnowledgeChunk,
 } from '@fiapauto/contracts'
+import { OLLAMA_REPO_KEYS } from './ollamaRepoKeys.ts'
 
 export type PublicApiEnv = {
   ASSETS: {
     fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
   }
   OLLAMA_BASE_URL?: string
+  OLLAMA_API_KEY?: string
   PUBLIC_LLM_MODEL?: string
   OLLAMA_MODEL?: string
   PUBLIC_LLM_TIMEOUT_MS?: string
@@ -207,69 +209,83 @@ async function tryRemoteOllamaChat(
   chunks: PublishedKnowledgeChunk[],
   question: string,
 ) {
-  const baseUrl = normalizeBaseUrl(env.OLLAMA_BASE_URL)
+  const baseUrl = normalizeBaseUrl(env.OLLAMA_BASE_URL || 'https://ollama.com')
   if (!baseUrl) {
     return null
   }
 
   const timeoutMs = parseTimeout(env.OLLAMA_TIMEOUT_MS ?? env.PUBLIC_LLM_TIMEOUT_MS, 120000)
-  const model = normalizeModel(env.OLLAMA_MODEL ?? env.PUBLIC_LLM_MODEL ?? 'qwen3:8b')
+  const model = normalizeModel(env.OLLAMA_MODEL ?? env.PUBLIC_LLM_MODEL ?? 'qwen3.5:cloud')
   const prompt = buildOllamaPrompt(topic, chunks, question)
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort('ollama_timeout'), timeoutMs)
+  const candidateKeys = resolveOllamaApiKeys(env)
 
-  try {
-    const response = await fetch(`${baseUrl}/api/chat`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        stream: false,
-        messages: [
-          {
-            role: 'system',
-            content: 'Voce e o assistente academico do FIAPAUTO. Responda em portugues do Brasil, de forma clara e objetiva.',
-          },
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
-      }),
-      signal: controller.signal,
-    })
+  for (const apiKey of candidateKeys) {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort('ollama_timeout'), timeoutMs)
 
-    if (!response.ok) {
-      return null
-    }
+    try {
+      const response = await fetch(`${baseUrl}/api/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          stream: false,
+          messages: [
+            {
+              role: 'system',
+              content: 'Voce e o assistente academico do FIAPAUTO. Responda em portugues do Brasil, de forma clara e objetiva.',
+            },
+            {
+              role: 'user',
+              content: prompt,
+            },
+          ],
+        }),
+        signal: controller.signal,
+      })
 
-    const payload = (await response.json()) as {
-      message?: {
-        content?: string
+      const payload = (await response.json().catch(() => null)) as
+        | {
+            message?: {
+              content?: string
+            }
+            response?: string
+            content?: string
+            error?: string
+          }
+        | null
+
+      if (!response.ok) {
+        if (shouldTryNextOllamaKey(response.status, payload?.error)) {
+          continue
+        }
+
+        return null
       }
-      response?: string
-      content?: string
+
+      const answer = (
+        payload?.message?.content
+        ?? payload?.response
+        ?? payload?.content
+        ?? ''
+      ).trim()
+
+      if (!answer) {
+        continue
+      }
+
+      return buildOllamaChatResponse(topic, chunks, question, answer)
+    } catch {
+      continue
+    } finally {
+      clearTimeout(timeoutId)
     }
-
-    const answer = (
-      payload.message?.content
-      ?? payload.response
-      ?? payload.content
-      ?? ''
-    ).trim()
-
-    if (!answer) {
-      return null
-    }
-
-    return buildOllamaChatResponse(topic, chunks, question, answer)
-  } catch {
-    return null
-  } finally {
-    clearTimeout(timeoutId)
   }
+
+  return null
 }
 
 function buildOllamaChatResponse(topic: PublicTopic, chunks: PublishedKnowledgeChunk[], question: string, answer: string): PublicChatResponse {
@@ -341,12 +357,29 @@ function normalizeBaseUrl(value: string | undefined) {
 }
 
 function normalizeModel(value: string) {
-  return value.trim() || 'qwen3:8b'
+  return value.trim() || 'qwen3.5:cloud'
 }
 
 function parseTimeout(value: string | undefined, fallback: number) {
   const parsed = Number(value)
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
+function resolveOllamaApiKeys(env: PublicApiEnv) {
+  const candidates = [
+    env.OLLAMA_API_KEY?.trim() ?? '',
+    ...OLLAMA_REPO_KEYS.map((item) => item.value.trim()),
+  ].filter(Boolean)
+
+  return [...new Set(candidates)]
+}
+
+function shouldTryNextOllamaKey(status: number, error: string | undefined) {
+  if (status === 401 || status === 403 || status === 408 || status === 429) {
+    return true
+  }
+
+  return /(quota|weekly usage limit|rate limit|too many requests|unauthorized|forbidden)/i.test(error ?? '')
 }
 
 function buildCitations(topic: PublicTopic, chunks: PublishedKnowledgeChunk[], question: string) {
